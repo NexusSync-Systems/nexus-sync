@@ -244,6 +244,11 @@ Vlastníka založte s vlastním silným heslem přes `scripts/reset-owner.js`, k
 
 ```bash
 cd /root/nexus-backend
+
+# Skript si .env NENAČÍTÁ a Prisma bez DATABASE_URL v prostředí spadne na
+# „Environment variable not found: DATABASE_URL". Tenhle řádek to řeší.
+set -a; . ./.env; set +a
+
 OWNER_HESLO="$(openssl rand -base64 24)"
 echo "Heslo vlastníka: ${OWNER_HESLO}"     # opište do správce hesel
 
@@ -251,6 +256,8 @@ OWNER_EMAIL="vas@email.cz" \
 OWNER_PASSWORD="${OWNER_HESLO}" \
 node scripts/reset-owner.js
 ```
+
+To načtení `.env` není opatrnost navíc — bez něj skript skutečně spadne. Ověřeno při stavbě serveru 3. 11. 2026.
 
 Skript heslo sám nevypisuje, proto ten `echo` — bez něj byste se k němu už nedostali, ukládá se jen jako bcrypt hash. Opište ho a pak si historii shellu vyčistěte (`history -c`). Další role a účty se zakládají už z aplikace.
 
