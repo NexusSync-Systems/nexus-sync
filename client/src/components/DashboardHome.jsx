@@ -12,6 +12,7 @@ import AIInsightCard from './AIInsightCard';
 // z kontextu znamenalo `undefined`, takže se relay větev dashboardu nikdy
 // nevykreslila. Kontext ji nevystavuje a vystavovat nemá.
 import { isRelayVariant } from '../plugins/NexusSms';
+import { VOLITELNE as DUVODY_BLACKLIST, popisDuvodu } from '../config/blacklistReasons';
 
 const DashboardHome = () => {
   const nexus = useNexus();
@@ -354,7 +355,7 @@ const DashboardHome = () => {
       </div>
 
       <div style={{ marginBottom: '3rem' }}>
-        <QuickBlacklistSection API_BASE={API_BASE} token={token} showToast={showToast} t={t} />
+        <QuickBlacklistSection API_BASE={API_BASE} token={token} showToast={showToast} t={t} lang={lang} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', gap: '2rem', marginBottom: '3rem' }}>
@@ -511,7 +512,7 @@ const DashboardHome = () => {
         </div>
       </div>
       <div style={{ marginBottom: '3rem' }}>
-        <QuickBlacklistSection API_BASE={API_BASE} token={token} showToast={showToast} t={t} />
+        <QuickBlacklistSection API_BASE={API_BASE} token={token} showToast={showToast} t={t} lang={lang} />
       </div>
       </>
       )}
@@ -591,7 +592,7 @@ const DashboardHome = () => {
 
           {/* Quick Blacklist Section */}
           <div style={{ marginTop: '1.5rem' }}>
-            <QuickBlacklistSection API_BASE={API_BASE} token={token} showToast={showToast} t={t} />
+            <QuickBlacklistSection API_BASE={API_BASE} token={token} showToast={showToast} t={t} lang={lang} />
           </div>
         </div>
 
@@ -736,8 +737,11 @@ const DashboardHome = () => {
   );
 };
 
-const QuickBlacklistSection = ({ API_BASE, token, showToast, t }) => {
+const QuickBlacklistSection = ({ API_BASE, token, showToast, t, lang }) => {
   const [phone, setPhone] = useState('');
+  // Důvod je kategorie z číselníku, ne volný text — viz config/blacklistReasons.js.
+  // Server neznámý kód odmítne, takže výchozí hodnota musí být platný kód.
+  const [duvod, setDuvod] = useState(DUVODY_BLACKLIST[0]);
   const [isLoading, setIsLoading] = useState(false);
 
   return (
@@ -751,6 +755,18 @@ const QuickBlacklistSection = ({ API_BASE, token, showToast, t }) => {
       <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
         {t('blacklistDesc')}
       </p>
+      <select
+        value={duvod}
+        onChange={e => setDuvod(e.target.value)}
+        disabled={isLoading}
+        aria-label={t('reason')}
+        data-testid="blacklist-reason"
+        style={{ width: '100%', marginBottom: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--card-border)', padding: '0.75rem 1rem', borderRadius: '10px', color: 'white' }}
+      >
+        {DUVODY_BLACKLIST.map(kod => (
+          <option key={kod} value={kod} style={{ background: '#1a1a1a' }}>{popisDuvodu(kod, lang)}</option>
+        ))}
+      </select>
       <div style={{ display: 'flex', gap: '0.75rem' }}>
         <input 
           type="text" 
@@ -768,7 +784,7 @@ const QuickBlacklistSection = ({ API_BASE, token, showToast, t }) => {
               const res = await fetch(`${API_BASE}/blacklist`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ phone: phone, reason: 'Quick block from Dashboard' })
+                body: JSON.stringify({ phone: phone, reason: duvod })
               });
               if (res.ok) {
                 setPhone('');

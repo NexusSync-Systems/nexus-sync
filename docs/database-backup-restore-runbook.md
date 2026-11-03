@@ -162,3 +162,40 @@ Minimum operational practice:
 - Check backup log daily.
 - Perform restore verification weekly.
 - Perform a full restore drill before pilot launch and after every database schema change.
+
+## Encrypted archive before decommissioning
+
+A rotating backup and a decommissioning archive are not the same thing. When the
+service is being shut down or paused indefinitely, the production database must
+not simply be left running: an unattended database holding location traces,
+blacklist entries and message history, with no retention policy and nobody
+watching it, is the worst possible position to be in.
+
+Use `server/scripts/archive-encrypted.sh` on the backend server:
+
+```bash
+openssl rand -base64 48 > /root/nexus-archive-passphrase.txt
+chmod 600 /root/nexus-archive-passphrase.txt
+
+ARCHIVE_PASSPHRASE_FILE=/root/nexus-archive-passphrase.txt \
+ARCHIVE_DIR=/var/backups/nexus-archive \
+bash server/scripts/archive-encrypted.sh
+```
+
+The script dumps the database, bundles it with a row-count manifest, encrypts
+the bundle with GPG symmetric AES-256, and then **decrypts it again and compares
+the result byte for byte** before deleting the plaintext dump. If any step of
+that chain fails it leaves the plaintext dump in place and says where, because
+the alternative is deleting the only readable copy.
+
+The passphrase is read from a file and never passed as an argument — arguments
+are visible to every user on the box through `ps`.
+
+Go/no-go before deleting production data:
+
+- The archive and its `.sha256` are stored on two separate physical targets,
+  neither of them the server being decommissioned.
+- The passphrase is stored separately from the archive. There is no recovery
+  without it.
+- The archive has been opened from the copy you took away, not from the one
+  still on the server.

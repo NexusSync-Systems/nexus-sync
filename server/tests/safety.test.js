@@ -68,7 +68,7 @@ describe('POST /api/blacklist', () => {
       licensePlate: null,
       name: null,
       severity: 'danger',
-      description: 'Known scammer',
+      reason: 'fake_booking',
       createdByName: 'Test User',
       reports: [],
     });
@@ -78,7 +78,7 @@ describe('POST /api/blacklist', () => {
       .set('Authorization', `Bearer ${makeToken()}`)
       .send({
         phone: '739 777 718',
-        description: 'Known scammer',
+        reason: 'fake_booking',
         severity: 'danger',
       });
 

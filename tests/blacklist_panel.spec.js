@@ -21,16 +21,14 @@ const ZAZNAMY = {
     {
       id: 'bl-1',
       phone: '+420604111222',
-      reason: 'Agresivní chování, odmítl zaplatit',
-      description: null,
+      reason: 'aggressive',
       createdAt: '2026-07-30T10:00:00.000Z',
       reports: [],
     },
     {
       id: 'bl-2',
       phone: '+420777999888',
-      reason: null,
-      description: 'Opakovaně nedorazil',
+      reason: 'no_show',
       createdAt: '2026-08-01T12:00:00.000Z',
       reports: [],
     },
@@ -61,11 +59,17 @@ test.describe('Blacklist', () => {
     await otevriOchranu(page, testInfo);
 
     await expect(page.getByText('+420604111222')).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText('Agresivní chování, odmítl zaplatit')).toBeVisible();
 
-    // Panel bere popis i důvod — druhý záznam má vyplněný jen `description`.
+    // Popisek se hledá UVNITŘ řádku, ne na stránce: stejné texty jsou i
+    // v rozbalovacím seznamu důvodů nad tabulkou.
+    //
+    // Server posílá KÓD kategorie, uživatel musí vidět popisek. Kdyby se
+    // číselníky klienta a serveru rozešly, zobrazil by se holý 'aggressive'.
+    const radek = (telefon) => page.getByText(telefon).locator('..');
+    await expect(radek('+420604111222').getByText('Agresivní chování')).toBeVisible();
+
     await expect(page.getByText('+420777999888')).toBeVisible();
-    await expect(page.getByText('Opakovaně nedorazil')).toBeVisible();
+    await expect(radek('+420777999888').getByText('Opakovaně nedorazil')).toBeVisible();
   });
 
   test('prázdný seznam nic nevymyslí (kontrolní vzorek)', async ({ page }, testInfo) => {

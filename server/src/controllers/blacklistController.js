@@ -3,6 +3,7 @@ const logger = require('../services/logger');
 const { getIO } = require('../services/socket');
 const { getPhoneLookupValues, normalizePhoneNumber } = require('../utils/phoneNumber');
 const { isAppOwnerRole } = require('../utils/authz');
+const { jePlatny: jePlatnyDuvod } = require('../config/blacklistReasons');
 
 const normalizeBlacklistPhone = (phone) => {
     if (phone === undefined) return undefined;
@@ -17,7 +18,7 @@ const phoneSearchValues = (phone) => {
 
 // Sdílený blacklist odhaluje varování napříč agenturami, ale identitu hlásící
 // agentury/osoby cizím agenturám neodhalujeme — u cizích reportů vynulujeme
-// agencyId/reportedByName/reportedById, obsah (comment/createdAt) zůstává.
+// agencyId/reportedByName/reportedById, obsah (reason/createdAt) zůstává.
 // App Owner a vlastní agentura vidí vše. Aplikuj VŠUDE, kde se vrací entry s reports.
 function redactReports(reports, req) {
     const callerAgencyId = req.user?.agencyId || null;
@@ -49,14 +50,14 @@ class BlacklistController {
                     { phone: { contains: search } },
                     { licensePlate: { contains: search } },
                     { name: { contains: search } },
-                    { description: { contains: search } }
+                    { reason: { contains: search } }
                 ];
             }
 
             const [entries, total] = await Promise.all([
                 prisma.blacklistEntry.findMany({
                     where,
-                    include: { reports: { select: { agencyId: true, reportedByName: true, comment: true, createdAt: true } } },
+                    include: { reports: { select: { agencyId: true, reportedByName: true, reason: true, createdAt: true } } },
                     orderBy: { createdAt: 'desc' },
                     skip,
                     take: Number(limit)
@@ -75,11 +76,13 @@ class BlacklistController {
     /** Create a new blacklist entry */
     async create(req, res) {
         try {
-            const { phone, licensePlate, name, description, severity = 'warning' } = req.body;
+            const { phone, licensePlate, name, reason, severity = 'warning' } = req.body;
             const { userId, agencyId } = req.user;
 
-            if (!description) {
-                return res.status(400).json({ message: 'Description is required' });
+            // Kategorii validuje už schema (z.enum), tohle je pojistka pro případ,
+            // že by se ruta někdy zavolala mimo validate().
+            if (!jePlatnyDuvod(reason)) {
+                return res.status(400).json({ message: 'Valid reason is required' });
             }
             if (!phone && !licensePlate && !name) {
                 return res.status(400).json({ message: 'At least one identifier (phone, license plate, or name) is required' });
@@ -93,7 +96,7 @@ class BlacklistController {
                     phone: normalizedPhone,
                     licensePlate: licensePlate ? licensePlate.toUpperCase() : null,
                     name: name || null,
-                    description,
+                    reason,
                     severity,
                     createdById: userId,
                     createdByName: user?.name || 'Unknown',
@@ -128,7 +131,7 @@ class BlacklistController {
         try {
             const { id } = req.params;
             const { userId } = req.user;
-            const { phone, licensePlate, name, description, severity } = req.body;
+            const { phone, licensePlate, name, reason, severity } = req.body;
 
             const existing = await prisma.blacklistEntry.findUnique({ where: { id } });
             if (!existing) return res.status(404).json({ message: 'Entry not found' });
@@ -144,7 +147,7 @@ class BlacklistController {
                     ...(phone !== undefined && { phone: normalizeBlacklistPhone(phone) }),
                     ...(licensePlate !== undefined && { licensePlate: licensePlate ? licensePlate.toUpperCase() : null }),
                     ...(name !== undefined && { name: name || null }),
-                    ...(description !== undefined && { description }),
+                    ...(reason !== undefined && { reason }),
                     ...(severity !== undefined && { severity })
                 },
                 include: { reports: true }
@@ -183,7 +186,7 @@ class BlacklistController {
     async report(req, res) {
         try {
             const { id } = req.params;
-            const { comment } = req.body;
+            const { reason } = req.body;
             const { userId, agencyId } = req.user;
 
             const entry = await prisma.blacklistEntry.findUnique({ where: { id } });
@@ -198,12 +201,12 @@ class BlacklistController {
                     reportedById: userId,
                     reportedByName: user?.name || 'Unknown',
                     agencyId,
-                    comment: comment || null
+                    reason: reason || null
                 },
                 update: {
                     reportedById: userId,
                     reportedByName: user?.name || 'Unknown',
-                    comment: comment || null
+                    reason: reason || null
                 }
             });
 
@@ -232,7 +235,7 @@ class BlacklistController {
                 blacklisted: true,
                 severity: entry.severity,
                 name: entry.name,
-                description: entry.description,
+                reason: entry.reason,
                 reportCount: entry.reports.length + 1
             });
         } catch (error) {

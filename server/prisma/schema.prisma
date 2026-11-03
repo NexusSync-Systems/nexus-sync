@@ -941,7 +941,8 @@ model BlacklistEntry {
   phone        String?
   licensePlate String?
   name         String?
-  description  String
+  // Kategorie z číselníku, ne volný text — viz config/blacklistReasons.js.
+  reason       String  @default("unclassified")
   severity     String  @default("warning") // warning | danger
 
   createdById   String
@@ -965,7 +966,7 @@ model BlacklistReport {
   reportedById   String
   reportedByName String
   agencyId       String // reporting agency
-  comment        String?
+  reason         String? // kategorie z číselníku, viz config/blacklistReasons.js
 
   createdAt DateTime @default(now())
 

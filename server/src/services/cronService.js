@@ -26,7 +26,27 @@ class CronService {
     // nebo chybí token, takže tady nemusí být žádná podmínka.
     cron.schedule('*/10 * * * *', () => this.syncBankTransfers());
 
-    logger.info('Cron service started (daily stats @ 01:00, subscription check @ 02:00, monitoring every 5 min)');
+    // Úklid osobních údajů po uplynutí doby uchování, denně ve 03:00.
+    // Běží po generování statistik (01:00), aby se denní čísla stihla spočítat
+    // z dat, která se teprve potom smažou.
+    cron.schedule('0 3 * * *', () => this.runRetentionCleanup());
+
+    logger.info('Cron service started (daily stats @ 01:00, subscription check @ 02:00, retention @ 03:00, monitoring every 5 min)');
+  }
+
+  /**
+   * Smaže osobní údaje, kterým vypršela doba uchování.
+   *
+   * Doby a pravidla jsou v config/retention.js a services/retentionService.js.
+   * Služba si selhání jednotlivých tabulek ošetřuje sama, tohle je poslední
+   * pojistka, aby výjimka neshodila cron.
+   */
+  async runRetentionCleanup() {
+    try {
+      await require('./retentionService').spustUklid();
+    } catch (err) {
+      logger.error('[Cron] Úklid podle retence selhal:', err.message);
+    }
   }
 
   async generateDailyStats() {

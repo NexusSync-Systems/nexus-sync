@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Shield, Plus, X, Phone, Search, Trash2, Filter } from 'lucide-react';
 import { useNexus } from '../../context/ContextHook';
+import { VOLITELNE as DUVODY, popisDuvodu } from '../../config/blacklistReasons';
 
 const BlacklistPanel = () => {
   const nexus = useNexus() || {};
@@ -15,7 +16,9 @@ const BlacklistPanel = () => {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [newPhone, setNewPhone] = useState('');
-  const [newReason, setNewReason] = useState('');
+  // Kategorie z číselníku, ne volný text (config/blacklistReasons.js).
+  // Výchozí hodnota je platný kód — prázdný řetězec by server odmítl.
+  const [newReason, setNewReason] = useState(DUVODY[0]);
   const [searchTerm, setSearchTerm] = useState('');
 
   const fetchEntries = useCallback(async () => {
@@ -48,7 +51,7 @@ const BlacklistPanel = () => {
       });
       if (res.ok) {
         setNewPhone('');
-        setNewReason('');
+        setNewReason(DUVODY[0]);
         fetchEntries();
         showToast(lang === 'cz' ? 'Číslo zablokováno' : 'Number blacklisted', 'success');
       }
@@ -72,9 +75,15 @@ const BlacklistPanel = () => {
     }
   };
 
-  const filteredEntries = entries.filter(_err => 
-    _err.phone.includes(searchTerm) || (_err.reason || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Hledá se i v POPISKU kategorie, ne jen v jejím kódu. Uživatel vidí
+  // „Nezaplatil", ale v datech je 'unpaid' — bez toho by hledání podle toho,
+  // co má před očima, schovalo právě ty záznamy, které hledá.
+  const filteredEntries = entries.filter(_err => {
+    const hledane = searchTerm.toLowerCase();
+    return _err.phone.includes(searchTerm)
+      || (_err.reason || '').toLowerCase().includes(hledane)
+      || popisDuvodu(_err.reason, lang).toLowerCase().includes(hledane);
+  });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', height: '100%' }}>
@@ -97,13 +106,17 @@ const BlacklistPanel = () => {
               style={{ width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--card-border)', padding: '0.75rem 1rem 0.75rem 2.5rem', borderRadius: '10px', color: 'white' }}
             />
           </div>
-          <input 
-            type="text" 
-            placeholder={t('reasonPlaceholder')}
+          <select
             value={newReason}
             onChange={_err => setNewReason(_err.target.value)}
+            aria-label={t('reason')}
+            data-testid="blacklist-reason"
             style={{ flex: 2, minWidth: '200px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--card-border)', padding: '0.75rem 1rem', borderRadius: '10px', color: 'white' }}
-          />
+          >
+            {DUVODY.map(kod => (
+              <option key={kod} value={kod} style={{ background: '#1a1a1a' }}>{popisDuvodu(kod, lang)}</option>
+            ))}
+          </select>
           <button 
             onClick={handleAdd}
             style={{ background: 'var(--accent-color)', color: 'white', border: 'none', padding: '0 1.5rem', borderRadius: '10px', fontWeight: '800', cursor: 'pointer' }}
@@ -145,7 +158,7 @@ const BlacklistPanel = () => {
                   </div>
                   <div>
                     <div style={{ fontWeight: '700', color: 'white' }}>{entry.phone || entry.name || entry.licensePlate || 'Unknown'}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{entry.description || entry.reason || t('noReason')}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{entry.reason ? popisDuvodu(entry.reason, lang) : t('noReason')}</div>
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>

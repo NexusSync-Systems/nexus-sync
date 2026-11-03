@@ -1,4 +1,5 @@
 const { z } = require('zod');
+const { VOLITELNE: VOLITELNE_DUVODY } = require('../config/blacklistReasons');
 
 // Reusable atoms
 const cuid = z.string().min(1).max(128);
@@ -114,11 +115,16 @@ const trackerLocationIngest = z.object({
 });
 
 // ── Blacklist ────────────────────────────────────────────────────────────────
+// Důvod je kategorie z číselníku, ne volný text. Proč: config/blacklistReasons.js.
+// Neznámý kód se odmítne — kdyby se propustil, vrátil by se volný text zadními
+// vrátky a navíc by ho klient neuměl zobrazit.
+const blacklistReason = z.enum(VOLITELNE_DUVODY);
+
 const createBlacklist = z.object({
   phone: phone,
   licensePlate: z.string().max(20).optional().nullable(),
   name: z.string().max(200).optional().nullable(),
-  description: z.string().min(1).max(5000),
+  reason: blacklistReason,
   severity: severity.optional().default('warning')
 }).refine(data => data.phone || data.licensePlate || data.name, {
   message: 'At least one identifier (phone, licensePlate, or name) is required'
@@ -128,12 +134,12 @@ const updateBlacklist = z.object({
   phone: phone,
   licensePlate: z.string().max(20).optional().nullable(),
   name: z.string().max(200).optional().nullable(),
-  description: z.string().min(1).max(5000).optional(),
+  reason: blacklistReason.optional(),
   severity: severity.optional()
 });
 
 const blacklistReport = z.object({
-  comment: optionalText
+  reason: blacklistReason.optional()
 });
 
 // ── SOS ──────────────────────────────────────────────────────────────────────

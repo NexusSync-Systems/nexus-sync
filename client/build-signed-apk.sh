@@ -43,7 +43,7 @@ echo "Key password: $NEXUS_KEY_PASSWORD"
 # KROK 3: JDI DO ANDROID SLOŽKY
 # ============================================================================
 
-cd /Users/zdenekdias/.gemini/antigravity/scratch/nexus-hub/client/android
+cd /Users/zdenekdias/Projects/nexus-hub/client/android
 
 echo "🏗️ Aktuální složka: $(pwd)"
 
@@ -68,7 +68,7 @@ echo "⏳ Toto může trvat 5-15 minut..."
 
 echo "✅ Build hotov! Hledám APK..."
 
-APK_PATH="/Users/zdenekdias/.gemini/antigravity/scratch/nexus-hub/client/android/app/release/Nexus-Relay-v*.apk"
+APK_PATH="/Users/zdenekdias/Projects/nexus-hub/client/android/app/release/Nexus-Relay-v*.apk"
 
 if ls $APK_PATH 1> /dev/null 2>&1; then
     echo "✅ APK NALEZEN!"
