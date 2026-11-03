@@ -4,8 +4,8 @@ import axios from 'axios';
 import { App } from '@capacitor/app';
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://nexus-api.myvnc.com/api';
 
+import { API_BASE } from '../constants/config';
 const UpdateBanner = () => {
   const [updateInfo, setUpdateInfo] = useState(null);
   const [isVisible, setIsVisible] = useState(false);

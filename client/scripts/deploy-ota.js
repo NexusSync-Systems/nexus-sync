@@ -9,7 +9,30 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = path.join(__dirname, '../dist');
-const API_URL = 'https://nexus-api.myvnc.com/api/vultr/upload-ota'; // Update to your real API URL
+// Adresa se nezapisuje. Zapsaná hodnota tu mířila na server, který 3. 11. 2026
+// zanikl, a komentář „Update to your real API URL" to nikomu nepřipomněl.
+//
+// Dvě role, které se nesmí splést:
+//   API_ORIGIN    kam se balík NAHRAVA (bez /api, dopisuje se níž)
+//   VITE_API_URL  co se ZAPEKE do balíku pro telefony (s /api)
+//
+// Druhá role se tu nejdřív zapomněla: skript pouští `npm run build` a Vite vidí
+// jen proměnné začínající VITE_, takže z `API_BASE_URL=... node deploy-ota.js`
+// se do balíku nedostalo nic. OTA aktualizace by telefonům dosadila prázdnou
+// adresu API a odřízla je od serveru — včetně kontroly dalších aktualizací.
+const API_ZADANE = (process.env.API_BASE_URL || process.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+if (!API_ZADANE) {
+  console.error('Chybí API_BASE_URL (nebo VITE_API_URL). Např.:');
+  console.error('  API_BASE_URL=https://api.example.eu node client/scripts/deploy-ota.js');
+  process.exit(1);
+}
+if (API_ZADANE.includes('myvnc.com')) {
+  console.error(`Adresa ${API_ZADANE} míří na zaniklý server. Zadej novou.`);
+  process.exit(1);
+}
+const API_ORIGIN = API_ZADANE.replace(/\/api$/, '');
+const VITE_API_URL = `${API_ORIGIN}/api`;
+const API_URL = `${API_ORIGIN}/api/vultr/upload-ota`;
 
 // Varianta se PŘEDÁVÁ, nehádá. Skript dřív pouštěl holé `npm run build`, takže
 // vznikl balík plné aplikace — jenže se jmenoval nexus-relay.zip a mířil na
@@ -32,7 +55,7 @@ async function deploy() {
     execSync('npm run build', {
       stdio: 'inherit',
       cwd: path.join(__dirname, '..'),
-      env: { ...process.env, VITE_APP_VARIANT: VARIANTA },
+      env: { ...process.env, VITE_APP_VARIANT: VARIANTA, VITE_API_URL },
     });
 
     // Relay má vlastní vstupní HTML (jiný titulek, jazyk a relativní cesty
@@ -54,6 +77,12 @@ async function deploy() {
     const obsah = jsSoubory.map(f => fs.readFileSync(path.join(DIST_DIR, 'assets', f), 'utf8')).join('');
     if (!obsah.includes(`"${VARIANTA}"`) && !obsah.includes(`'${VARIANTA}'`)) {
       throw new Error(`V balíku není varianta ${VARIANTA} — build dostal špatné VITE_APP_VARIANT`);
+    }
+
+    // Tatáž pojistka pro adresu API. Balík bez ní by se nahrál, telefony by si
+    // ho stáhly a odřízly se od serveru — a poznalo by se to až na nich.
+    if (!obsah.includes(VITE_API_URL)) {
+      throw new Error(`V balíku není adresa ${VITE_API_URL} — build nedostal VITE_API_URL`);
     }
 
     // 2. Zip the dist folder

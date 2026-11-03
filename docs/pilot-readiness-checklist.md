@@ -32,9 +32,16 @@ Podle `docs/production-secrets-runbook.md` overte:
 - Firebase push je nakonfigurovany.
 - Telegram alerty jsou nakonfigurovane nebo vedome vypnute.
 - `REQUIRE_STRIPE_CONFIG=true`, pokud ma byt v pilotu aktivni platba kartou.
+- `netlify.toml` nesmi mit v kontextech `deploy-preview` a `branch-deploy`
+  `VITE_API_URL` produkcniho API. K 3. 11. 2026 ho tam zamerne NEMA: nahledy
+  by na produkci stejne nedosahly, protoze CORS porovnava originy presne
+  a adresa nahledu obsahuje cislo pull requestu. Kdyby to nekdo zprovoznil
+  zastupnym znakem pro `*--nexus-sync.netlify.app`, zapisoval by s realnymi
+  uzivateli nahled z libovolneho pull requestu do jejich dat.
 
 Go/no-go:
 
+- No-go, pokud nahledy na Netlify miri na produkcni API a CORS produkce je pro ne otevreny.
 - No-go, pokud produkce pouziva test Stripe keys omylem.
 - No-go, pokud `STRIPE_SECRET_KEY` existuje, ale chybi `STRIPE_WEBHOOK_SECRET`.
 - No-go, pokud nejsou nastavene startup secrets a backend by spadl po restartu.

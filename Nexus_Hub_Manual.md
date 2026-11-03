@@ -53,7 +53,7 @@ Hlavní modul pro komunikaci se zákazníky.
 
 Aplikace Nexus Relay slouží jako most mezi vašimi zařízeními a cloudovým systémem Nexus Hub. Pro správné fungování je nutné aplikaci nainstalovat na stabilní zařízení Android.
 
-- **Stáhnout APK**: [Nexus Relay (Vlastní server)](https://nexus-api.myvnc.com/downloads/nexus-relay.apk) *(Doporučený způsob pro stabilitu)*
+- **Stáhnout APK**: v aplikaci v sekci **Aplikace ke stažení** *(Doporučený způsob pro stabilitu)*. Odkaz tu není zapsaný schválně — skládá ho server z vlastní adresy, takže se stěhováním backendu nepřestane platit.
 - **Vlastnosti**: 
   - Integrované zachytávání SMS
   - Real-time notifikace stavu hovorů

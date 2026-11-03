@@ -8,7 +8,8 @@ import { defineConfig, devices } from '@playwright/test';
  *    → No dev server needed for these. They run fast (~5-10s).
  *
  *  - E2E browser tests (smoke.spec.js, dashboard.spec.js): Open the local Vite dev server.
- *    → The frontend automatically connects to https://nexus-api.myvnc.com/api (production).
+ *    → The frontend connects to whatever VITE_API_URL it was built with; CI
+ *      points it at http://localhost:3000/api (see ci.yml, Playwright E2E Tests).
  *    → So browser tests also validate against the LIVE production DB.
  *
  * Run all tests:  npm run test:smoke

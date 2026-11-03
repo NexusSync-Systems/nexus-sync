@@ -5,7 +5,12 @@ const SMTP_PORT = parseInt(process.env.SMTP_PORT || '587', 10);
 const SMTP_USER = process.env.SMTP_USER || '';
 const SMTP_PASS = process.env.SMTP_PASS || '';
 const SMTP_FROM = process.env.SMTP_FROM || 'Nexus Hub <noreply@nexushub.app>';
-const APP_URL = process.env.APP_URL || 'https://nexus-api.myvnc.com';
+const { webAppUrl } = require('../utils/publicUrls');
+
+// APP_URL je adresa WEBU, ne API. Dřív tu byla zapsaná adresa API, takže odkaz
+// na reset hesla nevedl na formulář ani v době, kdy ten host ještě existoval —
+// API žádnou stránku neservíruje. Viz utils/publicUrls.js.
+const APP_URL = webAppUrl();
 
 let transporter = null;
 

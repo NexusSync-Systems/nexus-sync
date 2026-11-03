@@ -10,8 +10,8 @@ import { Capacitor } from '@capacitor/core';
 import { TRANSLATIONS } from '../translations';
 import * as tokenStore from '../services/tokenStore';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://nexus-api.myvnc.com/api';
 
+import { API_BASE } from '../constants/config';
 const RelayContext = createContext(null);
 
 export const useRelay = () => {

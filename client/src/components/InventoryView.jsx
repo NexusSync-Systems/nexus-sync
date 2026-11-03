@@ -1,12 +1,12 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNexus } from '../context/ContextHook';
+import { API_BASE } from '../constants/config';
 import {
   Package as PackageIcon, MapPin, AlertTriangle, Plus, Search, Filter,
   ChevronDown, CheckCircle2, XCircle, RefreshCw, MoreVertical,
   Minus, Check, X, Trash2, Edit2
 } from 'lucide-react';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://nexus-api.myvnc.com/api';
 
 const InventoryView = () => {
   const nexus = useNexus();

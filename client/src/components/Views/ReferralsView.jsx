@@ -6,8 +6,8 @@ import {
 } from 'lucide-react';
 import { useNexus } from '../../context/ContextHook';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://nexus-api.myvnc.com/api';
 
+import { API_BASE } from '../../constants/config';
 const ReferralsView = () => {
   const { _t, lang, isMobile, token, showToast } = useNexus();
   const [stats, setStats] = useState(null);

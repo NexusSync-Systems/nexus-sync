@@ -1,5 +1,22 @@
 # Testovací prostředí
 
+> **Stav k 3. 11. 2026: testovací backend NEEXISTUJE.**
+>
+> Stroj, pro který je tenhle postup napsaný, byl smazán. Konkrétně už neplatí
+> jméno `nexus-test-api.myvnc.com`, nginx a certbot pro ně, a secrety
+> `STAGING_HOST` / `STAGING_USER` / `STAGING_PASSWORD` míří na starý server.
+> Nový backend běží na `api.nexusstack.eu` (Oracle, 952 MB RAM).
+>
+> Druhá kopie by na něm jít měla — vlastní databáze ve stejném PostgreSQL
+> a jeden Node proces navíc je asi 150 MB z těch 952 — ale chce to novou
+> poddomenu s certifikátem a přepsat oddíly „Jednorázové nastavení serveru"
+> a „Secrety v GitHubu" níž. **Ověřený postup pro nový server zatím není.**
+>
+> Náhledy pull requestů proto **nemají žádné API** a ohlásí to do konzole.
+> Na produkci by nedosáhly ani s nastavenou adresou: CORS porovnává originy
+> přesně a adresa náhledu obsahuje číslo pull requestu. Podrobně v oddílu
+> „Testovací web" níž.
+
 Testovací backend je **druhá kopie téhož kódu** na tomtéž serveru: vlastní
 databáze, vlastní proces, vlastní port, vlastní `.env`. Náhledy pull requestů
 na Netlify pak míří na něj místo na produkci.
@@ -96,16 +113,25 @@ Náhledy Netlify u pull requestů se na testovací API napojí samy —
 `netlify.toml` jim nastaví `VITE_API_URL`. Dole se ukáže oranžový pruh
 `TESTOVACÍ PROSTŘEDÍ`, aby se to nedalo splést s ostrým provozem.
 
-Dokud testovací backend neběží, míří náhledy pořád na produkci — a `netlify.toml`
-je proto zatím nastavený tak, že se dole ukáže **červený** pruh
-`NÁHLED ZMĚN — POZOR, PRACUJETE S OSTRÝMI DATY`.
+Dokud testovací backend neběží, **náhledy žádné API nemají** a ohlásí to do
+konzole. Vzhled zkontrolovat lze, chování ne.
 
-Až server postavíš, odkomentuj v `netlify.toml` připravené řádky s
-`VITE_API_URL` a přepiš `VITE_NEXUS_ENVIRONMENT` na `staging`. Pruh se tím
-změní na oranžový `TESTOVACÍ PROSTŘEDÍ — DATA NEJSOU OSTRÁ`.
+Není to opomenutí. Dřív se adresa nenastavovala vůbec a klient spadl na
+zapsanou výchozí hodnotu; když ten server zanikl, náhledy tiše mířily na mrtvý
+stroj. 3. 11. 2026 jsem je proto nasměroval na produkční API — a při ověření se
+ukázalo, že na ně stejně nedosáhnou: CORS v `server/src/app.js` porovnává
+originy **přesně** a adresa náhledu obsahuje číslo pull requestu
+(`deploy-preview-150--nexus-sync.netlify.app`). Produkce vrací 403.
 
-Ten pořádek je schválně: kdyby se `VITE_API_URL` zapnula dřív, každý náhled by
-mířil na neexistující API a ukazoval prázdnou aplikaci.
+Zprovoznit to proti produkci by znamenalo zástupný znak pro
+`*--nexus-sync.netlify.app` v CORS ostrého API — tedy že z prohlížeče smí na
+produkci volat náhled z libovolného pull requestu. To je rozhodnutí o
+bezpečnosti ostrého API; zapsaná adresa bez něj by jen vypadala jako hotové
+nastavení, které CORS blokuje.
+
+Až server postavíš, přepiš v `netlify.toml` `VITE_API_URL` na jeho adresu
+a `VITE_NEXUS_ENVIRONMENT` na `staging`. Pruh se tím změní na oranžový
+`TESTOVACÍ PROSTŘEDÍ — DATA NEJSOU OSTRÁ`.
 
 ## Co tím nezískáš
 

@@ -5,7 +5,28 @@ const { execSync } = require('child_process');
 
 const REPO        = 'Zdenekdi/nexus-sync';
 const ENV_PATH    = path.join(__dirname, '../server/.env');
-const API_BASE_URL = 'https://nexus-api.myvnc.com';
+// Adresa API se NEZAPISUJE. Tenhle skript secret API_BASE_URL skutečně
+// nastavuje, takže zapsaná hodnota se jeho spuštěním rozšíří do CI — a přesně
+// tak se tam 19. 6. 2026 dostal `nexus-api.myvnc.com`, server, který
+// 3. 11. 2026 přestal existovat. Od té doby na něm padaly build APK i web.
+//
+// Hodnota se proto bere z prostředí nebo z argumentu a kontroluje se stejnými
+// pravidly jako v ci.yml: ne myvnc.com, ne s /api na konci.
+const API_BASE_URL = (process.env.API_BASE_URL || process.argv[3] || '').trim().replace(/\/+$/, '');
+if (!API_BASE_URL) {
+  console.error('Chybí API_BASE_URL. Použij:');
+  console.error('  API_BASE_URL=https://api.example.eu node scripts/setup-github-secrets.js <GH_TOKEN>');
+  console.error('  node scripts/setup-github-secrets.js <GH_TOKEN> https://api.example.eu');
+  process.exit(1);
+}
+if (API_BASE_URL.includes('myvnc.com')) {
+  console.error(`API_BASE_URL míří na ${API_BASE_URL} — to je zaniklý server. Zadej novou adresu.`);
+  process.exit(1);
+}
+if (/\/api$/.test(API_BASE_URL)) {
+  console.error('API_BASE_URL nesmí končit na /api — jednotlivé úlohy si ho dopisují samy.');
+  process.exit(1);
+}
 
 // 1. JWT_SECRET z .env
 const content   = fs.readFileSync(ENV_PATH, 'utf8');

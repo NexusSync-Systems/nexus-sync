@@ -5,9 +5,10 @@
 
 import axios from 'axios';
 
-const DEFAULT_API_BASE = process.env.CI
-  ? 'https://nexus-api.myvnc.com/api'
-  : 'http://localhost:3000/api';
+// Dřív tu pro CI byla zapsaná produkční adresa. CI si NEXUS_API_URL nastavuje
+// samo (viz ci.yml, job Playwright E2E Tests) a vlastní server si na localhostu
+// zvedne, takže ta hodnota jen tiše mířila na server, který zanikl.
+const DEFAULT_API_BASE = 'http://localhost:3000/api';
 
 export const API_BASE = process.env.NEXUS_API_URL || DEFAULT_API_BASE;
 export const DEVICE_SECRET = process.env.NEXUS_DEVICE_SECRET || (process.env.CI ? '' : 'devicesecret12345');

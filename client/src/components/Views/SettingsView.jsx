@@ -8,6 +8,7 @@ import {
 import { useNexus } from '../../context/ContextHook';
 import StripeEmbeddedCheckoutModal from '../Billing/StripeEmbeddedCheckoutModal';
 
+import { API_BASE } from '../../constants/config';
 const SettingsView = () => {
   const nexus = useNexus();
   const {
@@ -82,7 +83,7 @@ const SettingsView = () => {
     let zruseno = false;
     (async () => {
       try {
-        const zaklad = import.meta.env.VITE_API_URL || 'https://nexus-api.myvnc.com/api';
+        const zaklad = API_BASE;
         const r = await fetch(`${zaklad}/billing/methods`, { headers: { Authorization: `Bearer ${nexus.token}` } });
         if (!r.ok) return;
         const d = await r.json();
@@ -122,7 +123,7 @@ const SettingsView = () => {
         return;
       }
 
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'https://nexus-api.myvnc.com/api'}/billing/checkout`, {
+      const response = await fetch(`${API_BASE}/billing/checkout`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -644,7 +645,7 @@ const SettingsView = () => {
                     const password = document.getElementById('pin-auth-password').value;
                     if (!pin || pin.length < 4 || !password) return showToast(lang === 'cz' ? 'Vyplněte 4-místný PIN a heslo.' : 'Enter 4-digit PIN and password.', 'error');
                     try {
-                      const res = await fetch(`${import.meta.env.VITE_API_URL || 'https://nexus-api.myvnc.com/api'}/auth/security-pin`, {
+                      const res = await fetch(`${API_BASE}/auth/security-pin`, {
                         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${nexus.token}` },
                         body: JSON.stringify({ pin, password })
                       });

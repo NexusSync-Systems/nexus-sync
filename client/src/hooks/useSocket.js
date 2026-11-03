@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import { setSocket as setBridgeSocket } from '../services/socketBridge';
 
-const SOCKET_URL = (import.meta.env.VITE_API_URL || 'https://nexus-api.myvnc.com/api').replace(/\/api$/, '');
+import { SERVER_ORIGIN } from '../constants/config';
+const SOCKET_URL = SERVER_ORIGIN;
 
 export const useSocket = (token, onNewMessage, onMessageUpdated, onIncomingCall, onEmergencyAlert, onSipIncomingCall, onRelayCommand, onRelayEvent, onTrackerLocation, onGhostCall) => {
   const socketRef = useRef(null);

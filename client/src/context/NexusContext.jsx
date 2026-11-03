@@ -24,25 +24,17 @@ import { useChatLogic } from '../hooks/useChatLogic';
 import { useSocket } from '../hooks/useSocket';
 import { initPushNotifications } from '../services/pushService';
 
+import { API_BASE } from '../constants/config';
 // API Configuration
-// IMPORTANT: Capacitor WebView ALWAYS reports hostname as 'localhost' even on a real device,
-// so we MUST use Capacitor.isNativePlatform() to distinguish native apps from web dev.
+// Adresa API má jediný zdroj: constants/config.js. Dřív ji měl tenhle soubor
+// vlastní a zapsanou natvrdo (#146), a stejný výraz si kopírovalo dalších
+// devatenáct souborů — oprava na jednom místě proto nestačila a přihlášení
+// mířilo na zaniklý server, i když zbytek aplikace už na nový.
 //
-// VITE_API_URL má přednost a zapéká se při buildu (.github/workflows/ci.yml).
-// Dřív tady adresa byla NATVRDO a tenhle soubor jediný ji z prostředí nečetl —
-// přitom je to hlavní provider pro přihlášení i data. Správně nastavený build
-// tedy posílal zbytek aplikace na novou adresu, ale přihlášení pořád na
-// nexus-api.myvnc.com, server, který už neexistuje. A protože se build i
-// nasazení povedly, nic na to neupozornilo.
-//
-// Zbývající hodnoty jsou jen záloha pro vývoj: nativní prostředí a prohlížeč
-// mimo localhost na starou adresu, localhost na místní backend.
-const API_BASE = import.meta.env.VITE_API_URL
-  || (Capacitor.isNativePlatform()
-    ? 'https://nexus-api.myvnc.com/api'
-    : (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-      ? 'http://localhost:5000'
-      : 'https://nexus-api.myvnc.com/api'));
+// Pozor na rozdíl proti dřívějšímu stavu: záložní adresa pro lokální vývoj je
+// teď `http://localhost:3000/api` podle výchozího PORTu serveru, ne
+// `http://localhost:5000`. Kdo si backend pouští na 5000, nastaví si
+// VITE_API_URL nebo PORT.
 
 /**
  * Main Provider for Nexus Hub.

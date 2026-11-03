@@ -62,7 +62,7 @@ async function runSetup() {
         const examplePath = path.join(__dirname, '.env.example');
         const exampleContent = fs.existsSync(examplePath) 
             ? fs.readFileSync(examplePath, 'utf8')
-            : 'BACKEND_URL=https://nexus-api.myvnc.com\nRELAY_TOKEN=VAŠ_TOKEN_Z_DASHBOARDU\n';
+            : 'BACKEND_URL=https://ADRESA_VASEHO_API\nRELAY_TOKEN=VAŠ_TOKEN_Z_DASHBOARDU\n';
         
         fs.writeFileSync(envPath, exampleContent);
         console.log('✅ Soubor .env vytvořen. Prosím, vložte do něj svůj RELAY_TOKEN.');

@@ -10,7 +10,7 @@ Kód **JE připraven** pro produkční databázi, ale vyžaduje malou konfigurac
 
 ### 1. **API-First Architecture**
 ```javascript
-const API_BASE = import.meta.env.VITE_API_URL || 'https://nexus-api.myvnc.com/api';
+import { API_BASE } from '../constants/config'; // jediný zdroj adresy API
 ```
 - NexusContext má centrální `API_BASE` URL
 - Všechny HTTP requesty jdou přes axios
@@ -48,7 +48,7 @@ DatabaseBackedWebChatAdapter   // WebChat + DB
 import { DatabaseService } from '@/services/database';
 
 export const NexusProvider = ({ children }) => {
-  const API_BASE = import.meta.env.VITE_API_URL || 'https://nexus-api.myvnc.com/api';
+  import { API_BASE } from '../constants/config'; // jediný zdroj adresy API
   const token = /* get from auth */;
 
   // Create database service

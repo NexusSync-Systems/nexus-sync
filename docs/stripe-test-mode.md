@@ -77,7 +77,7 @@ testovacim Stripe klicum a testovacimu uzivateli.
 
 ```bash
 RUN_STRIPE_PAYMENT_E2E=true \
-NEXUS_API_URL=https://nexus-api.myvnc.com/api \
+NEXUS_API_URL=https://api.nexusstack.eu/api \
 FRONTEND_URL=https://nexus-sync-8d50b.web.app/settings \
 STRIPE_TEST_PLAN_ID=pro_monthly \
 npm run test:stripe:payment
@@ -87,7 +87,7 @@ Pro embedded Checkout primo z nastaveni aplikace:
 
 ```bash
 RUN_STRIPE_EMBEDDED_E2E=true \
-NEXUS_API_URL=https://nexus-api.myvnc.com/api \
+NEXUS_API_URL=https://api.nexusstack.eu/api \
 FRONTEND_URL=https://nexus-sync-8d50b.web.app/settings \
 STRIPE_TEST_PLAN_ID=pro_monthly \
 npm run test:stripe:payment

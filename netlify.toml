@@ -2,33 +2,70 @@
   command = "cd client && npm install --legacy-peer-deps && npm run build"
   publish = "client/dist"
 
-# Náhledy pull requestů.
+# ── Náhledy pull requestů ────────────────────────────────────────────────────
 #
-# Frontend je z pull requestu, ale API je pořád PRODUKČNÍ — klient bez
-# nastaveného VITE_API_URL spadne na zadrátovanou výchozí hodnotu
-# https://nexus-api.myvnc.com/api. Náhled tedy vypadá jako pískoviště
-# a přitom maže a odesílá doopravdy.
+# K čemu to je: Netlify postaví z každého pull requestu kopii webové aplikace
+# na vlastní adrese, aby se změna dala proklikat ještě před sloučením.
 #
-# Než bude stát testovací backend, aspoň to musí být vidět: pruh dole
-# varuje, že jsou data ostrá.
+# NÁHLEDY ZÁMĚRNĚ NEMAJÍ ADRESU API. Dole je proč — není to opomenutí.
+#
+# Adresa se tu 3. 11. 2026 nejdřív nastavila na produkční API, protože náhledy
+# mířily na zaniklý `nexus-api.myvnc.com` a bylo potřeba, aby zase fungovaly.
+# Při ověření se ukázalo, že to nestačí: CORS v `server/src/app.js` porovnává
+# originy PŘESNĚ a adresa náhledu obsahuje číslo pull requestu
+# (`deploy-preview-150--nexus-sync.netlify.app`). Produkce proto náhled odmítá
+# s 403 — ověřeno, ne odhadnuto.
+#
+# Funkční náhledy proti produkci by tedy znamenaly zástupný znak pro
+# `*--nexus-sync.netlify.app` v CORS produkčního API: z prohlížeče by na
+# produkci směl volat náhled z libovolného pull requestu. To je rozhodnutí
+# o bezpečnosti ostrého API, ne o pohodlí při kontrole změn, a nedělá se
+# mimochodem. Zapsaná adresa by vytvořila dojem hotového nastavení, které
+# CORS stejně blokuje — tedy nejhorší ze všech stavů.
+#
+# Bez `VITE_API_URL` náhled nahlas ohlásí chybu do konzole a nenačte data
+# (`client/src/constants/config.js`). Vzhled zkontrolovat lze, chování ne.
+#
+# Dvě cesty dál, obě vědomé:
+#
+#   1. Testovací backend podle `docs/testovaci-prostredi.md`. Náhledy pak míří
+#      na něj, jeho CORS smí být volnější, protože nedrží ostrá data. Tady se
+#      pak nastaví `VITE_API_URL` na jeho adresu a `VITE_NEXUS_ENVIRONMENT`
+#      na "staging" (pruh zoranžoví na „DATA NEJSOU OSTRÁ").
+#
+#   2. Vědomě otevřít CORS produkce pro náhledy a smířit se s tím. Pak sem
+#      patří `VITE_API_URL` produkčního API a pruh zůstává červený. Pozor:
+#      s pilotem by náhled z každého pull requestu zapisoval do dat
+#      skutečných lidí — hlídá to brána 2 v `docs/pilot-readiness-checklist.md`.
 [context.deploy-preview.environment]
   VITE_NEXUS_ENVIRONMENT = "preview"
 
 [context.branch-deploy.environment]
   VITE_NEXUS_ENVIRONMENT = "preview"
 
-# ── Až poběží testovací backend ────────────────────────────────────────────
-# Odkomentuj řádky níž a v obou blocích výš přepiš hodnotu na "staging".
-# Teprve pak náhledy přestanou sahat na ostrá data. Postup je v
-# docs/testovaci-prostredi.md.
+# ── Produkční kontext Netlify zde ZÁMĚRNĚ není ───────────────────────────────
 #
-# [context.deploy-preview.environment]
-#   VITE_API_URL = "https://nexus-test-api.myvnc.com/api"
-#   VITE_NEXUS_ENVIRONMENT = "staging"
+# `nexus-sync.netlify.app` staví z masteru a je to druhá veřejná kopie
+# aplikace; ostrý web běží na `nexusstack.eu` (Firebase hosting). Nastavit tu
+# adresu API by znamenalo mít dvě funkční veřejné instance téže aplikace, a to
+# nikdo nechtěl — je to zbytek po přechodu na Firebase.
 #
-# [context.branch-deploy.environment]
-#   VITE_API_URL = "https://nexus-test-api.myvnc.com/api"
-#   VITE_NEXUS_ENVIRONMENT = "staging"
+# Bez proměnné ta stránka nahlas ohlásí chybu a nenačte data, což je pro
+# nasazení, které se nemá používat, poctivější než tiše fungovat. Jestli se
+# Netlify nemá používat vůbec, patří ten projekt zrušit v Netlify samotném —
+# z repozitáře to udělat nejde.
+
+# ── Až poběží testovací backend ──────────────────────────────────────────────
+#
+# Cílový stav podle `docs/testovaci-prostredi.md`: druhá kopie backendu
+# s vlastní databází, kam náhledy můžou zapisovat bez následků. Potom se tady
+# přepíše `VITE_API_URL` na jeho adresu a `VITE_NEXUS_ENVIRONMENT` na
+# "staging" — pruh se tím změní na oranžový `DATA NEJSOU OSTRÁ`.
+#
+# Postup v tom dokumentu je napsaný pro zaniklý server (`nexus-test-api.myvnc.com`,
+# `STAGING_*` secrety, certbot pro tu doménu) a je potřeba ho přepsat pro
+# `api.nexusstack.eu`. Na současném stroji je to otázka ~150 MB RAM z 952
+# a jedné poddomény s certifikátem.
 
 [[redirects]]
   from = "/*"

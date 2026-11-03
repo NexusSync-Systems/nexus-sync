@@ -1,5 +1,5 @@
 const axios = require('axios');
-const API_BASE = process.env.API_BASE || 'https://nexus-api.myvnc.com/api';
+const API_BASE = process.env.API_BASE || 'http://localhost:3000/api';
 const TEST_PASSWORD = process.env.TEST_PASSWORD;
 const TEST_EMAILS = (process.env.TEST_EMAILS || '')
   .split(',')
