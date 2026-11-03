@@ -617,8 +617,23 @@ jobs:
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
-          password: ${{ secrets.DEPLOY_PASSWORD }}
+          # Přihlášení KLÍČEM, ne heslem. Obraz Ubuntu u Oracle Cloudu má
+          # `PasswordAuthentication no` a rootovi do authorized_keys vkládá
+          # vynucený příkaz, který přihlášení odmítne — heslem se tam tedy
+          # připojit nelze a nastavovat ho na stroji s portem 22 otevřeným do
+          # internetu by byl krok zpátky.
+          #
+          # DEPLOY_USER proto musí být běžný uživatel se sudo (na Oracle
+          # Ubuntu `ubuntu`), DEPLOY_SSH_KEY jeho privátní klíč.
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
+            # Celé tělo běží pod rootem: aplikace leží v /root/nexus-backend
+            # a pm2 proces vlastní root. Uvozený heredoc znamená, že proměnné
+            # rozbaluje až ten vnitřní shell, ne přihlašovací.
+            #
+            # `exit 1` uvnitř ukončí vnitřní shell, sudo vrátí jeho návratový
+            # kód a krok spadne — pojistky níž tedy fungují dál.
+            sudo -s <<'NEXUS_DEPLOY'
             cd /root/nexus-backend
             git pull origin master
             if [ -n "${{ secrets.STRIPE_SECRET_KEY }}" ] && [ -z "${{ secrets.STRIPE_WEBHOOK_SECRET }}" ]; then
@@ -724,7 +739,12 @@ jobs:
             fi
 
             ./node_modules/.bin/prisma migrate deploy
-            pm2 restart nexus-backend-final --update-env || pm2 start server.js --name nexus-backend-final
+            # Vstupní bod je src/index.js (viz "main" a "start" v package.json).
+            # Dřív tu stálo server.js, který v backendovém repozitáři vůbec
+            # není — záložní větev tedy nikdy nemohla projít. Nevadilo to,
+            # dokud proces na serveru existoval a stačil restart; na čistém
+            # serveru by se ale backend nerozjel a deploy by spadl právě tady.
+            pm2 restart nexus-backend-final --update-env || pm2 start src/index.js --name nexus-backend-final
             sleep 3
             pm2 status nexus-backend-final | grep -q online && echo "Deploy OK" || exit 1
             # Zajištění oprávnění pro Nginx (www-data) číst z /root složky (403 Forbidden Fix)
@@ -733,6 +753,7 @@ jobs:
             chmod o+x /root/nexus-backend/server || true
             chmod o+x /root/nexus-backend/server/public || true
             chmod -R o+rx /root/nexus-backend/server/public/downloads || true
+            NEXUS_DEPLOY
 
   deploy-frontend:
     name: Deploy Frontend (Firebase)
@@ -813,7 +834,13 @@ jobs:
         run: bash scripts/relay-field-test.sh
         env:
           # Relay phone identity — no Bearer token, only installationId + secret
-          API_BASE_URL:            ${{ secrets.API_BASE_URL }}
+          #
+          # Přípona /api je tady schválně. Secret API_BASE_URL se drží BEZ ní,
+          # protože rozvoz APK výš i backend (vultrRoutes.js) si /api dopisují
+          # sami. Tenhle skript a audit-operational-health.js ho naopak čekají
+          # jako součást adresy — mají výchozí hodnoty končící /api. Dopsáním
+          # tady se obě skupiny spotřebitelů přestanou hádat o jednu hodnotu.
+          API_BASE_URL:            ${{ secrets.API_BASE_URL }}/api
           RELAY_INSTALLATION_ID:   ${{ secrets.RELAY_INSTALLATION_ID }}
           RELAY_PROFILE_ID:        ${{ secrets.RELAY_PROFILE_ID }}
           DEVICE_SECRET:           ${{ secrets.NEXUS_DEVICE_SECRET }}
@@ -826,7 +853,8 @@ jobs:
       - name: Run strict operational health smoke
         run: node server/scripts/audit-operational-health.js
         env:
-          OPS_API_BASE_URL:           ${{ secrets.API_BASE_URL }}
+          # Totéž co výš: skript čeká adresu včetně /api, secret ji nemá.
+          OPS_API_BASE_URL:           ${{ secrets.API_BASE_URL }}/api
           # App Owner login for /admin/operational-health (admin endpoint)
           OPS_OWNER_EMAIL:            ${{ secrets.TEST_OWNER_EMAIL }}
           OPS_OWNER_PASSWORD:         ${{ secrets.TEST_OWNER_PASSWORD }}
