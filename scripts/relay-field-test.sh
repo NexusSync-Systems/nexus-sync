@@ -114,7 +114,19 @@ for var in API_BASE DEVICE_SECRET INSTALLATION_ID PROFILE_ID; do
     echo "  ✗ Missing: $var"
     missing=$((missing+1))
   else
-    echo "  ✓ $var = ${val:0:50}$([ ${#val} -gt 50 ] && echo '...' || true)"
+    case "$var" in
+      # Přihlašovací tajemství do logu nepatří ani zkrácené. GitHub Actions
+      # maskují PŘESNOU hodnotu secretu, takže 50znakový prefix delšího klíče
+      # té masce unikne — a při lokálním spuštění se nemaskuje nic. Pro
+      # diagnostiku stačí, že je proměnná vyplněná, a její délka.
+      #
+      # Vzorek místo výčtu, aby nová tajná proměnná v seznamu výš nevypadla
+      # do logu jen proto, že si na ni někdo nevzpomněl.
+      *SECRET*|*PASSWORD*|*TOKEN*)
+        echo "  ✓ $var je nastaveno (${#val} znaků)" ;;
+      *)
+        echo "  ✓ $var = ${val:0:50}$([ ${#val} -gt 50 ] && echo '...' || true)" ;;
+    esac
   fi
 done
 if [ "$missing" -gt 0 ]; then
