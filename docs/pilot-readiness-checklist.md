@@ -158,7 +158,10 @@ treti strany, doby uchovani a deset otazek, ktere musi rozhodnout clovek.
 Go/no-go:
 
 - No-go, pokud neexistuje pravni zaklad pro preposilani SMS tretich osob.
-- No-go, pokud chybi verejne zasady ochrany osobnich udaju.
+- No-go, pokud chybi verejne zasady ochrany osobnich udaju. Navrh je
+  v `docs/zasady-ochrany-osobnich-udaju-NAVRH.md` a je zamerne nehotovy —
+  ma 18 mist, kde odpoved nevyplyva z kodu. Vyplnit je odhadem a zverejnit
+  by znamenalo zavazne prohlaseni o pravnim zakladu, ktery nikdo neposoudil.
 - No-go, pokud se nemaze nic a data by se hromadila bez lhuty od prvniho dne.
 - No-go, pokud nikdo neni urceny k vyrizovani zadosti subjektu.
 
