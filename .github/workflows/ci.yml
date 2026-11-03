@@ -688,6 +688,27 @@ jobs:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           set -euo pipefail
+
+          # Pojistka pred destruktivni operaci. `--delete` smaze na serveru vse,
+          # co neni ve zdroji — kdyby `server/` byl prazdny nebo neuplny (spatny
+          # checkout, prejmenovany adresar), setrel by bezici aplikaci. Zmereno:
+          # proti prazdnemu adresari by slo o 256 souboru.
+          #
+          # Levnejsi je overit, ze zdroj vypada jako backend, nez to pak
+          # obnovovat ze zalohy.
+          for SOUBOR in server/package.json server/src/index.js server/prisma/schema.prisma; do
+            if [ ! -f "$SOUBOR" ]; then
+              echo "::error::$SOUBOR chybi — nenasazuji. Rsync s --delete by server setrel."
+              exit 1
+            fi
+          done
+          POCET=$(find server -type f -not -path 'server/node_modules/*' | wc -l)
+          if [ "$POCET" -lt 100 ]; then
+            echo "::error::V server/ je jen $POCET souboru, cekano aspon 100 — nenasazuji."
+            exit 1
+          fi
+          echo "Zdroj vypada v poradku: $POCET souboru."
+
           KLIC="$RUNNER_TEMP/deploy_key"
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$KLIC"
           chmod 600 "$KLIC"
