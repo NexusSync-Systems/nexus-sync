@@ -5,6 +5,8 @@ let io;
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const prisma = require('./db');
+const logger = require('./logger');
+const { originPovolen } = require('../utils/corsOrigins');
 
 // Ověří socket handshake auth a vrátí socket.user context (nebo hodí chybu).
 // Dvě cesty:
@@ -36,32 +38,18 @@ async function resolveSocketUser(auth = {}) {
 }
 
 const init = (server) => {
-  // Build allowed origins matching the Express CORS configuration
-  const envOrigins = (process.env.ALLOWED_ORIGINS || '')
-    .split(',')
-    .map(o => o.trim())
-    .filter(Boolean);
-
-  const FIREBASE_ORIGINS = [
-    'https://nexus-hub.firebaseapp.com',
-    'https://nexus-hub.web.app'
-  ];
-
-  const CAPACITOR_ORIGINS = [
-    'https://localhost',
-    'capacitor://localhost',
-    'http://localhost:5173',
-    'http://localhost:3000'
-  ];
-
-  const allowedOrigins = [...envOrigins, ...FIREBASE_ORIGINS, ...CAPACITOR_ORIGINS];
-
+  // Seznam povolenych originu je spolecny s Expressem (utils/corsOrigins.js).
+  // Driv tu byl vlastni a chybely v nem obe domeny `nexus-sync-8d50b.*`, tedy
+  // ta, na ktere aplikace bezi: HTTP proslo a Socket.IO vratilo 403.
   io = new Server(server, {
     cors: {
       origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin)) {
+        if (originPovolen(origin)) {
           callback(null, true);
         } else {
+          // Driv se blokovany origin nikam nezapsal, takze se o tom nikdo
+          // nedozvedel. Express ho loguje odjakziva.
+          logger.warn(`Socket.io CORS Blocked for origin: ${origin}`);
           callback(new Error(`Socket.io CORS: Origin ${origin} not allowed`));
         }
       },

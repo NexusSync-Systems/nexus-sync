@@ -54,18 +54,31 @@ describe('webAppUrl', () => {
     expect(nacti().webAppUrl()).toBe('https://web.example.eu');
   });
 
-  it('bez APP_URL vezme první https origin z ALLOWED_ORIGINS', () => {
+  it('bez APP_URL NEHÁDÁ z ALLOWED_ORIGINS', () => {
+    // Původně se tu bralo první https z ALLOWED_ORIGINS. Na skutečném serveru
+    // je tam jako první `nexusstack.eu`, což je prezentační stránka — odkaz na
+    // reset hesla i návrat ze Stripe by mířil tam, kde ta stránka není.
+    // ALLOWED_ORIGINS je seznam originů, které smí do API, ne adresa webu.
     delete process.env.APP_URL;
-    process.env.ALLOWED_ORIGINS = 'http://nezabezpeceny.test,https://web.example.eu,https://druhy.example.eu';
-    expect(nacti().webAppUrl()).toBe('https://web.example.eu');
+    process.env.ALLOWED_ORIGINS = 'https://prezentacni-stranka.test,https://web.example.eu';
+    expect(nacti().webAppUrl()).toBe('');
   });
 
-  it('bez obojího vrátí prázdno, ne adresu API', () => {
+  it('bez APP_URL vrátí prázdno, ne adresu API', () => {
     delete process.env.APP_URL;
     delete process.env.ALLOWED_ORIGINS;
     const url = nacti().webAppUrl();
     expect(url).toBe('');
     expect(url).not.toContain('myvnc.com');
+  });
+
+  it('o chybějící APP_URL varuje', () => {
+    delete process.env.APP_URL;
+    const { webAppUrl } = nacti();
+    const logger = require('../src/services/logger');
+    webAppUrl();
+    const v = logger.warn.mock.calls.filter(c => String(c[0]).includes('APP_URL'));
+    expect(v).toHaveLength(1);
   });
 });
 
