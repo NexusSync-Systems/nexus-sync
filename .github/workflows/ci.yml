@@ -187,6 +187,12 @@ jobs:
       ENCRYPTION_KEY: ci-e2e-encryption-key-nejmene-32-znaku
       # Sem míří testy proti živému API místo na produkci.
       NEXUS_API_URL: http://localhost:3000/api
+      # Zapéká se do buildu klienta, ze kterého `tests/helpers/mocks.js`
+      # servíruje SPA (`client/dist`). Dřív se nenastavovala a klient spadl na
+      # zapsanou výchozí adresu; od 3. 11. 2026 žádná není, takže by `API_BASE`
+      # zůstal prázdný a požadavky by přišly o předponu `/api` — mock by na ně
+      # nesedl a SPA handler by místo JSONu vrátil index.html.
+      VITE_API_URL: http://localhost:3000/api
 
     steps:
       - uses: actions/checkout@v4
