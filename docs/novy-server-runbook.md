@@ -6,19 +6,40 @@ Vzor jednorázového nastavení je v `docs/testovaci-prostredi.md`; tady je prod
 
 ---
 
-## 0. Nejdřív: nevzdávejte data předčasně
+## 0. Nejdřív data, teprve pak server
 
-Zálohy se podle `docs/database-backup-restore-runbook.md` ukládaly do `/var/backups/nexus` — **na ten samý server**. V runbooku není ani jedna zmínka o kopii mimo něj. Se zánikem serveru tedy zmizely i zálohy.
+Proč je ztráta serveru rovnou ztrátou dat: zálohy se podle `docs/database-backup-restore-runbook.md` ukládaly do `/var/backups/nexus`, tedy **na ten samý stroj**, a v celém runbooku není ani jedna zmínka o kopii jinam. Záloha ležící na zálohovaném serveru není záloha. Sekce 7 to proto řeší jako první věc, ne jako poslední.
 
-**Než to přijmete jako hotovou ztrátu, ověřte u poskytovatele:**
+### Dump datujte a ověřte, než se podle něj začnete rozhodovat
 
-- Je instance jen pozastavená (suspended) kvůli platbě, nebo smazaná (destroyed)? Pozastavená se obvykle dá obnovit.
-- Existuje snapshot nebo záloha svazku? U Vultru i Hetzneru se platí zvlášť a bývá vypnutá — ale stojí to minutu na zjištění.
-- Nemáte dump stažený ručně na svém počítači z nějakého dřívějšího ladění?
+Zálohy vyrábí `server/scripts/backup-postgres.sh` a jméno nese **čas v UTC**, takže věk se pozná ze souboru:
 
-Pokud nic z toho, data jsou pryč a pilot začne s prázdnou databází. Pro pilot to je přijatelné; horší by bylo stavět na domněnce, že se někde ještě najdou.
+```
+nexus_YYYYMMDDTHHMMSSZ.dump
+nexus_YYYYMMDDTHHMMSSZ.dump.sha256
+```
 
-> I kdyby se databáze objevila, bez původního `.env` by **šifrovaná pole nešla přečíst** — `ENCRYPTION_KEY` chrání SIP hesla a `Profile.credentials`. Proto musí ten klíč od teď existovat i mimo server.
+K ověření je v repozitáři hotový nástroj. **Nerestorujte do produkční databáze** — skript to sám odmítne, ale smysl je podívat se na obsah dřív, než ho někam pustíte:
+
+```bash
+sudo -u postgres createdb nexus_kontrola
+cd /root/nexus-backend
+
+BACKUP_FILE=/cesta/k/nexus_….dump \
+RESTORE_DATABASE_URL=postgresql://nexus:${DB_HESLO}@127.0.0.1:5432/nexus_kontrola \
+bash scripts/verify-restore-postgres.sh
+```
+
+Skript zkontroluje `sha256` (pokud je soubor vedle), obnoví dump do té oddělené databáze a **vypíše počty řádků po tabulkách**. Z nich poznáte, jak je záloha úplná, a z `MAX(createdAt)` ve zprávách i to, kam v čase sahá:
+
+```bash
+psql postgresql://nexus:${DB_HESLO}@127.0.0.1:5432/nexus_kontrola \
+  -c 'SELECT MAX("createdAt") AS posledni_zprava FROM "Message";'
+```
+
+Teprve podle toho se rozhodněte, jestli ji nasadit jako výchozí stav pilotu, nebo začít s prázdnou databází.
+
+> **Pozor na šifrovaná pole.** Bez původního `ENCRYPTION_KEY` z `.env` starého serveru se z obnovené databáze **nepřečtou SIP hesla ani `Profile.credentials`** — dešifrovat je nelze. Zbytek dat je čitelný; tyhle dvě věci bude potřeba nastavit znovu. Proto musí nový klíč od začátku existovat i mimo server.
 
 ---
 
@@ -35,15 +56,38 @@ Backend potřebuje **trvale běžící proces s diskem**, ne serverless:
 
 Tím padá Render free (po 15 minutách nečinnosti službu uspí), funkce na Vercelu i Netlify (žádný trvalý proces ani disk) a Railway (jen úvodní kredit).
 
-**Doporučení: Hetzner CX22, kolem 4 € měsíčně.** Právě jste o server přišel; za cenu dvou kafé měsíčně dostanete něco, co nikdo nerecykluje. Volání na Hetzner API navíc už v kódu jsou.
+### Zdarma: Oracle Cloud Always Free
 
-**Bezplatná varianta: Oracle Cloud Always Free** — ARM Ampere, 4 jádra, 24 GB RAM, 200 GB disku, zdarma trvale; uběhne i Ollama. Dvě úskalí, ať to není překvapení: kapacita ARM v populárních regionech bývá nedostupná a Oracle si vyhrazuje zabírat nevyužité instance. Na pilot to jde, na něco, co nesmí zmizet, bych na to nesázel.
+Jediná bezplatná varianta, která tyhle čtyři požadavky splní celé: **ARM Ampere A1, až 4 jádra a 24 GB RAM, 200 GB disku, zdarma trvale** (ne na 12 měsíců). Uběhne na tom Node, PostgreSQL i Ollama naráz.
+
+Co vědět předem, ať to není překvapení:
+
+- **Kapacita ARM v evropských regionech často není dostupná** — registrace projde, ale vytvoření instance skončí na „out of capacity". Zkoušet opakovaně, nebo zvolit jiný region.
+- **Oracle si vyhrazuje zabírat nevyužité Always Free instance.** Backend, který obsluhuje relay telefony, nevyužitý nebude, takže by to nemělo hrozit — ale je to podmínka, ne záruka.
+- Při registraci chce **kartu k ověření totožnosti**. Z Always Free se neúčtuje, ale karta je potřeba.
+
+### Když ARM kapacita nebude
+
+Záložní bezplatná skladba, rozdělená na dvě části:
+
+- **Google Cloud Always Free** `e2-micro` (jen regiony `us-central1`, `us-west1`, `us-east1`), 30 GB disku — pro Node a nahrané soubory. Má jen 1 GB RAM, takže na něm Postgres nechte běžet jinde.
+- **Neon** nebo **Supabase** — bezplatný PostgreSQL. Databáze tím zmizí ze serveru, čímž se mimochodem vyřeší i to, že záloha ležela vedle dat.
+
+Dvě výhrady: `e2-micro` je jen v USA, takže k tomu patří delší odezva **a otázka přenosu údajů mimo EU** — viz `docs/zpracovani-osobnich-udaju.md`. A 1 GB RAM na Ollamu nestačí; AI nechte pro pilot vypnutou, `template_fallback` to pokryje.
+
+### Až později
+
+**Hetzner CX22, kolem 4 € měsíčně** — jestli pilot vyjde a nechcete, aby vám server zmizel znovu. Volání na Hetzner API už v kódu jsou. Tohle není potřeba řešit teď.
 
 ## 2. Jméno serveru
 
-**Nepoužívejte znovu bezplatnou dynamickou DNS.** Předchozí jméno `nexus-api.myvnc.com` běželo na No-IP, kde se bezplatný hostname musí potvrzovat každých 30 dní, jinak přestane odpovídat.
+Předchozí jméno `nexus-api.myvnc.com` běželo na No-IP, kde se bezplatný hostname musí **potvrzovat každých 30 dní**, jinak přestane odpovídat. Přesně to se stalo.
 
-Kupte vlastní doménu (kolem 250–300 Kč na rok) a dejte `A` záznam na IP serveru. Odstraní to celou tuhle třídu výpadků.
+**Zdarma a bez té pasti: DuckDNS.** Dává `vase-jmeno.duckdns.org`, nevyžaduje pravidelné potvrzování a Let's Encrypt na něm funguje. Cloudový server má pevnou veřejnou IP, takže stačí záznam jednou nastavit.
+
+Pokud se u No-IP rozhodnete zůstat, dejte si **připomínku na potvrzení každých 25 dní**. Jinak tenhle výpadek přijde znovu, jen o měsíc později.
+
+Až budete ochotný platit, **vlastní doména za 250–300 Kč na rok** tuhle třídu výpadků odstraní úplně. Na pilot to ale není podmínka.
 
 ---
 
