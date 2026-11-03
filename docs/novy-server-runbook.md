@@ -26,6 +26,23 @@ Projděte proto, co z toho platí:
 
 Až když se nic nenajde, platí, že záloha ležela jen na zaniklém stroji. Sekce 7 proto odvoz mimo server řeší jako první věc, ne jako poslední.
 
+### Výsledek hledání v listopadu 2026 — ať to nikdo nedělá podruhé
+
+Odvoz mimo server **nastavený byl**: `Google Drive / My Drive / Nexus_Backups`. Ležely v něm tři soubory z 18., 19. a 20. března 2026, každý 2,1 kB.
+
+Použitelné nebyly a stojí za to vědět proč:
+
+- obsahovaly `root/nexus-sync/server/prisma/dev.db`, tedy **vývojovou SQLite databázi**, ne produkční Postgres;
+- ve všech třech byl **tentýž nezměněný soubor z 15. 3. 2026 11:23** o 53 248 B. Úloha tři noci po sobě zazipovala soubor, do kterého nikdo nepsal — živou databázi nezálohovala nikdy;
+- obsah: `Agency` 1, `Profile` 3, `Role` 4, `User` 1 řádek. Žádné `Chat`, žádné `Message`;
+- pak odvoz přestal a nikdo si toho nevšiml.
+
+Prověřeno i to, co by mohlo zálohu držet jinde: **žádný workflow nikdy neukládal databázi jako artefakt** (všechna tři místa s `upload-artifact` jsou Playwright report, APK a AAB) a v repozitáři není nastavený žádný odvoz, jen pokyn v runbooku.
+
+**Produkční data tedy k dispozici nejsou a pilot začíná s prázdnou databází.**
+
+Je to učebnicový tichý pád: zálohy vznikaly, v Drive se objevovaly, a celou dobu v nich nebylo nic. Proto je v sekci 7 ověření restoru podmínka, ne doporučení, a proto `scripts/prozkoumej-zalohu.sh` vypisuje počty řádků — na takové záloze by hned ukázal `Message 0`.
+
 ### Dump datujte a ověřte, než se podle něj začnete rozhodovat
 
 Zálohy vyrábí `server/scripts/backup-postgres.sh` a jméno nese **čas v UTC**, takže věk se pozná ze souboru:
