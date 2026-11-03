@@ -12,10 +12,10 @@
 > poddomenu s certifikátem a přepsat oddíly „Jednorázové nastavení serveru"
 > a „Secrety v GitHubu" níž. **Ověřený postup pro nový server zatím není.**
 >
-> Náhledy pull requestů proto míří na **produkční** API a ukazují červený pruh
-> `NÁHLED ZMĚN — POZOR, PRACUJETE S OSTRÝMI DATY`. Dnes nemají co poškodit
-> (databáze je prázdná), ale s pilotem by zapisovaly do dat skutečných lidí —
-> hlídá to brána 2 v `docs/pilot-readiness-checklist.md` jako no-go.
+> Náhledy pull requestů proto **nemají žádné API** a ohlásí to do konzole.
+> Na produkci by nedosáhly ani s nastavenou adresou: CORS porovnává originy
+> přesně a adresa náhledu obsahuje číslo pull requestu. Podrobně v oddílu
+> „Testovací web" níž.
 
 Testovací backend je **druhá kopie téhož kódu** na tomtéž serveru: vlastní
 databáze, vlastní proces, vlastní port, vlastní `.env`. Náhledy pull requestů
@@ -113,14 +113,21 @@ Náhledy Netlify u pull requestů se na testovací API napojí samy —
 `netlify.toml` jim nastaví `VITE_API_URL`. Dole se ukáže oranžový pruh
 `TESTOVACÍ PROSTŘEDÍ`, aby se to nedalo splést s ostrým provozem.
 
-Dokud testovací backend neběží, míří náhledy na produkci — `netlify.toml` jim
-od 3. 11. 2026 nastavuje `VITE_API_URL` na `https://api.nexusstack.eu/api`
-**výslovně** a nechává červený pruh
-`NÁHLED ZMĚN — POZOR, PRACUJETE S OSTRÝMI DATY`.
+Dokud testovací backend neběží, **náhledy žádné API nemají** a ohlásí to do
+konzole. Vzhled zkontrolovat lze, chování ne.
 
-Dřív se tam adresa nenastavovala vůbec a klient spadl na zapsanou výchozí
-hodnotu. Když ten server zanikl, náhledy tiše mířily na mrtvý stroj a nikdo si
-toho nevšiml, protože build i nasazení proběhly úspěšně.
+Není to opomenutí. Dřív se adresa nenastavovala vůbec a klient spadl na
+zapsanou výchozí hodnotu; když ten server zanikl, náhledy tiše mířily na mrtvý
+stroj. 3. 11. 2026 jsem je proto nasměroval na produkční API — a při ověření se
+ukázalo, že na ně stejně nedosáhnou: CORS v `server/src/app.js` porovnává
+originy **přesně** a adresa náhledu obsahuje číslo pull requestu
+(`deploy-preview-150--nexus-sync.netlify.app`). Produkce vrací 403.
+
+Zprovoznit to proti produkci by znamenalo zástupný znak pro
+`*--nexus-sync.netlify.app` v CORS ostrého API — tedy že z prohlížeče smí na
+produkci volat náhled z libovolného pull requestu. To je rozhodnutí o
+bezpečnosti ostrého API; zapsaná adresa bez něj by jen vypadala jako hotové
+nastavení, které CORS blokuje.
 
 Až server postavíš, přepiš v `netlify.toml` `VITE_API_URL` na jeho adresu
 a `VITE_NEXUS_ENVIRONMENT` na `staging`. Pruh se tím změní na oranžový
