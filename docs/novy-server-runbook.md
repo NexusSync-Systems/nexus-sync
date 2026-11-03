@@ -64,14 +64,18 @@ apt install -y nodejs
 npm install -g pm2
 ```
 
-Databáze (zvolte si vlastní heslo, do `.env` půjde stejné):
+Databáze. Heslo si nechte vygenerovat a držte ho v proměnné — nevypisuje se na obrazovku a nezůstane v historii shellu:
 
 ```bash
+DB_HESLO="$(openssl rand -base64 24)"
+
 sudo -u postgres createdb nexus
-sudo -u postgres psql -c "CREATE USER nexus WITH PASSWORD 'zvol-vlastni-heslo';"
+sudo -u postgres psql -c "CREATE USER nexus WITH PASSWORD '${DB_HESLO}';"
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE nexus TO nexus;"
 sudo -u postgres psql -d nexus -c "GRANT ALL ON SCHEMA public TO nexus;"
 ```
+
+Proměnnou `DB_HESLO` nechte v tomtéž shellu — použije se v dalším kroku pro `.env`. Pak si ji odložte do správce hesel.
 
 Kód. Nasazení očekává klon **backendového** repozitáře přesně v `/root/nexus-backend` — tam úloha `sync-backend` posílá podsložku `server/`:
 
@@ -99,7 +103,7 @@ Vygenerování klíčů:
 ```bash
 cd /root/nexus-backend
 {
-  echo "DATABASE_URL=postgresql://nexus:zvol-vlastni-heslo@127.0.0.1:5432/nexus"
+  echo "DATABASE_URL=postgresql://nexus:${DB_HESLO}@127.0.0.1:5432/nexus"
   echo "JWT_SECRET=$(openssl rand -base64 48)"
   echo "DEVICE_SECRET=$(openssl rand -base64 32)"
   echo "ENCRYPTION_KEY=$(openssl rand -base64 48)"
