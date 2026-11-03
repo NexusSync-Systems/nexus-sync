@@ -8,7 +8,23 @@ Vzor jednorázového nastavení je v `docs/testovaci-prostredi.md`; tady je prod
 
 ## 0. Nejdřív data, teprve pak server
 
-Proč je ztráta serveru rovnou ztrátou dat: zálohy se podle `docs/database-backup-restore-runbook.md` ukládaly do `/var/backups/nexus`, tedy **na ten samý stroj**, a v celém runbooku není ani jedna zmínka o kopii jinam. Záloha ležící na zálohovaném serveru není záloha. Sekce 7 to proto řeší jako první věc, ne jako poslední.
+**Než usoudíte, že jsou data pryč, zjistěte, kam se kopírovaly zálohy mimo server.**
+
+`docs/database-backup-restore-runbook.md` kopii mimo server **vyžaduje**, a to dvakrát:
+
+> Store backups off-host or in encrypted storage. A backup on the same VM is not disaster recovery.
+
+> Copy at least one daily backup off the app server.
+
+Příkladová cesta `/var/backups/nexus` v tom runbooku je jen lokální mezikrok, ne jediné místo, kde zálohy měly ležet. Takže není pravda, že se ztrátou serveru nutně zmizelo všechno — záleží na tom, jestli se to nastavené cílové místo opravdu používalo.
+
+Projděte proto, co z toho platí:
+
+- Byl nakonfigurovaný `rclone`, `scp` nebo jiný odvoz na druhý stroj či do objektového úložiště? Podívejte se, kam.
+- Nemáte dump v e-mailu, ve svém počítači nebo na disku z nějakého dřívějšího ladění?
+- Co říká `/var/log/nexus-db-backup.log`, pokud jeho kopii někde máte?
+
+Až když se nic nenajde, platí, že záloha ležela jen na zaniklém stroji. Sekce 7 proto odvoz mimo server řeší jako první věc, ne jako poslední.
 
 ### Dump datujte a ověřte, než se podle něj začnete rozhodovat
 
@@ -55,7 +71,12 @@ psql postgresql://nexus:${DB_HESLO}@127.0.0.1:5432/nexus_kontrola \
 
 Teprve podle toho se rozhodněte, jestli ji nasadit jako výchozí stav pilotu, nebo začít s prázdnou databází.
 
-> **Pozor na šifrovaná pole.** Bez původního `ENCRYPTION_KEY` z `.env` starého serveru se z obnovené databáze **nepřečtou SIP hesla ani `Profile.credentials`** — dešifrovat je nelze. Zbytek dat je čitelný; tyhle dvě věci bude potřeba nastavit znovu. Proto musí nový klíč od začátku existovat i mimo server.
+> **Pozor na šifrovaná pole — a jsou na nich dva různé klíče.**
+>
+> - `ENCRYPTION_KEY` (`server/src/utils/encryption.js`) chrání `Profile.credentials`.
+> - `SIP_ENCRYPTION_KEY` (`server/src/services/sipEncryption.js`) chrání SIP hesla, tedy `DeviceBinding.sipPassword` a `SipTrunk`. Je to **hex o 64 znacích** a funkce ho odmítne, když jinou délku nemá.
+>
+> Bez původních hodnot z `.env` starého serveru se tahle pole z obnovené databáze **dešifrovat nedají**. Zbytek dat je čitelný; SIP přihlašovací údaje a `Profile.credentials` se budou muset nastavit znovu. Proto oba klíče od začátku patří i mimo server.
 
 ---
 
@@ -160,6 +181,13 @@ Pokud je nastavený kterýkoli ze Stripe klíčů, audit vyžaduje **všechny t�
 
 Vygenerování klíčů:
 
+Audit nehlídá, ale backend je potřebuje, takže do `.env` patří taky:
+
+| Proměnná | K čemu |
+| --- | --- |
+| `API_BASE_URL` | **bez `/api` na konci.** `server/src/routes/vultrRoutes.js` z ní skládá odkazy ke stažení APK a OTA jako `${API_BASE_URL}/api/vultr/…`. Když chybí, použije se zapsaná výchozí hodnota `https://nexus-api.myvnc.com`, tedy adresa zaniklého serveru — a aktualizace by odkazovaly tam. Změna stejnojmenného GitHub secretu v oddílu 8 tuhle proměnnou na server **nezapíše**. |
+| `SIP_ENCRYPTION_KEY` | hex o 64 znacích; chrání SIP hesla. Potřeba jen když používáte SIP. |
+
 ```bash
 cd /root/nexus-backend
 {
@@ -167,15 +195,19 @@ cd /root/nexus-backend
   echo "JWT_SECRET=$(openssl rand -base64 48)"
   echo "DEVICE_SECRET=$(openssl rand -base64 32)"
   echo "ENCRYPTION_KEY=$(openssl rand -base64 48)"
+  echo "SIP_ENCRYPTION_KEY=$(openssl rand -hex 32)"
+  echo "API_BASE_URL=https://vase-domena.cz"
   echo "PORT=3000"
   echo "NODE_ENV=production"
 } > .env
 chmod 600 .env
 ```
 
+`SIP_ENCRYPTION_KEY` se generuje `-hex 32`, ne `-base64` — `sipEncryption.js` vyžaduje přesně 64 hexadecimálních znaků a jinou délku odmítne.
+
 Stripe klíče a `APK_DEPLOY_TOKEN` do `.env` dopisuje samo nasazení z GitHub secretů — ty tam ručně nedávejte.
 
-**Tři vygenerované klíče si hned odložte mimo server** (správce hesel). Bez nich se ze zálohy nepřečtou šifrovaná pole. Přesně tohle teď chybí.
+**Všechny čtyři vygenerované klíče** (`JWT_SECRET`, `DEVICE_SECRET`, `ENCRYPTION_KEY`, `SIP_ENCRYPTION_KEY`) **si hned odložte mimo server**, do správce hesel. Bez posledních dvou se ze zálohy nepřečtou šifrovaná pole. Přesně tohle teď chybí.
 
 ## 5. První migrace a spuštění
 
@@ -183,10 +215,27 @@ Stripe klíče a `APK_DEPLOY_TOKEN` do `.env` dopisuje samo nasazení z GitHub s
 cd /root/nexus-backend
 ./node_modules/.bin/prisma generate
 ./node_modules/.bin/prisma migrate deploy
-node prisma/seed.js    # zakládá role a výchozí účty
 pm2 start src/index.js --name nexus-backend-final
 pm2 save && pm2 startup
 ```
+
+### Založení vlastníka — ne přes seed
+
+**`node prisma/seed.js` v produkci nepoužívejte.** Zakládá demo účty se **veřejně známými hesly** (`password123`, `Nexus2024!`) a sám se proti tomu brání: při `NODE_ENV=production` vyhodí chybu, dokud mu to někdo nepřepíše přes `ALLOW_PROD_SEED=true`. To obcházení nedělejte.
+
+Vlastníka založte s vlastním silným heslem přes `scripts/reset-owner.js`, který zároveň vytvoří roli „App Owner", pokud chybí:
+
+```bash
+cd /root/nexus-backend
+OWNER_HESLO="$(openssl rand -base64 24)"
+echo "Heslo vlastníka: ${OWNER_HESLO}"     # opište do správce hesel
+
+OWNER_EMAIL="vas@email.cz" \
+OWNER_PASSWORD="${OWNER_HESLO}" \
+node scripts/reset-owner.js
+```
+
+Skript heslo sám nevypisuje, proto ten `echo` — bez něj byste se k němu už nedostali, ukládá se jen jako bcrypt hash. Opište ho a pak si historii shellu vyčistěte (`history -c`). Další role a účty se zakládají už z aplikace.
 
 Jméno procesu **musí** být `nexus-backend-final` — nasazení ho restartuje podle něj.
 
@@ -206,12 +255,20 @@ server {
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        client_max_body_size 25M;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        client_max_body_size 260M;
     }
 }
 ```
 
-Hlavičky `Upgrade` a `Connection` nejsou ozdoba — bez nich nefungují WebSockety (`socket.io`). `client_max_body_size` kvůli nahrávání do galerie a APK.
+Tři řádky, které vypadají jako detail a nejsou:
+
+**`Upgrade` a `Connection`** — bez nich nefungují WebSockety (`socket.io`).
+
+**`X-Forwarded-For`** je bezpečnostní. `server/src/app.js` má `app.set('trust proxy', 1)` a omezení počtu pokusů o přihlášení klíčuje podle `req.ip`, který se bere z `X-Forwarded-For` — ne z `X-Real-IP`. Kdyby se tahle hlavička neposílala, stalo by se dvojí: všichni klienti by sdíleli jednu adresu (loopback nginxu), takže by si limit navzájem vyčerpávali, **a hlavičku poslanou klientem by nic nepřepsalo**, takže by si útočník mohl klíč limitu zvolit sám. `$proxy_add_x_forwarded_for` připojí skutečnou adresu klienta na konec, což je přesně to, co `trust proxy` 1 čte.
+
+**`client_max_body_size 260M`** — ne 25M. `server/src/routes/vultrRoutes.js` přijímá APK do 150 MB, jeden endpoint do 250 MB. Při nižším limitu by nginx takový upload odmítl s HTTP 413 ještě **předtím**, než se dostane na backend, a rozvoz APK z CI by selhal na souborech, které endpoint povoluje.
 
 ```bash
 certbot --nginx -d vase-domena.cz
@@ -240,7 +297,22 @@ Ověřte, že restore funguje, **než na tom poběží pilot** — postup je v `
 | `DEPLOY_HOST` | nová doména nebo IP |
 | `DEPLOY_USER` | `root` |
 | `DEPLOY_PASSWORD` | heslo k novému serveru |
-| `API_BASE_URL` | `https://vase-domena.cz/api` |
+| `API_BASE_URL` | `https://vase-domena.cz` — **bez `/api`**, viz níž |
+
+### Pozor na `/api` v `API_BASE_URL`
+
+Tahle proměnná se v repozitáři používá nejednotně a snadno se tím něco rozbije. Co jsem ověřil:
+
+| Kdo ji čte | Co očekává |
+| --- | --- |
+| `ci.yml` (rozvoz APK) | **bez** `/api` — skládá `${API_BASE_URL}/api/vultr/upload-apk` |
+| backend `vultrRoutes.js` | **bez** `/api` — skládá `${API_BASE_URL}/api/vultr/…` |
+| `scripts/relay-field-test.sh` | **s** `/api` — výchozí hodnota je `…myvnc.com/api` |
+| `audit-operational-health.js` | **s** `/api` — výchozí je `localhost:5000/api` |
+
+Convence je tedy: **secret i serverová proměnná bez `/api`**, protože tak to čtou obě místa, která něco nasazují. Ty dva skripty, které `/api` čekají, dostávají správnou hodnotu dopsáním přípony v `ci.yml` — upraveno spolu s tímhle runbookem, ať se obě skupiny nehádají o jednu hodnotu.
+
+Kdybyste secret nastavil s `/api`, rozvoz APK by mířil na `/api/api/vultr/upload-apk` a skončil by chybou 404.
 
 Nasazení dnes používá **přihlášení heslem pod rootem** (`appleboy/ssh-action` s `password`). Na novém serveru doporučuji přejít na klíč — `ssh-action` umí `key:` — a heslové přihlášení v `sshd_config` vypnout. Je to jedna změna v úloze a jeden nový secret.
 
@@ -248,11 +320,16 @@ Nasazení dnes používá **přihlášení heslem pod rootem** (`appleboy/ssh-ac
 
 Per-device tajemství se počítá jako HMAC-SHA256 z `installationId` klíčem `DEVICE_SECRET`. Nový `DEVICE_SECRET` tedy znamená, že **žádný stávající telefon se nepřihlásí**.
 
-Na každém telefonu je potřeba:
+**Adresa backendu se v aplikaci přepsat nedá.** Bere se z `VITE_API_URL` **v době buildu** (`client/src/context/RelayContext.jsx`, `client/src/constants/config.js`) a když chybí, použije se zapsaná výchozí hodnota `https://nexus-api.myvnc.com/api`, tedy zaniklý server. `configureRelay` tu adresu jen zkopíruje z JS do nativních předvoleb — nevytváří ji, takže v předvolbách přepsat nejde.
 
-1. v aplikaci přepsat adresu backendu na novou doménu (ukládá se do předvoleb, `configureRelay`),
-2. znovu projít párování přes `/api/device/verify`,
-3. zkontrolovat, že se obnovuje `lastSeenAt`.
+Postup je tedy:
+
+1. **postavit APK znovu** s novou adresou — `VITE_API_URL=https://vase-domena.cz/api`,
+2. **nainstalovat ji na telefon ručně**, přes kabel nebo přeneseným souborem (rozvoz přes server zatím nejde, viz níž),
+3. znovu projít párování přes `/api/device/verify`,
+4. zkontrolovat, že se obnovuje `lastSeenAt`.
+
+Bod 2 je nutný kvůli slepičímu problému: rozvoz APK jde přes backend, na který se telefon ještě neumí připojit. První instalaci proto nemine ruční přenos.
 
 Rozvoz APK jde přes `API_BASE_URL/api/vultr/upload-apk`, tedy přes tenhle backend. Dokud neběží, nedostanete na telefony ani novou verzi — včetně opravy šestihodinového limitu z #139, kterou relay telefony pořád nemají.
 

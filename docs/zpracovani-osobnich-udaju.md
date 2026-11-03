@@ -151,7 +151,10 @@ Tedy i po sloučení #136 by bez lhůty zůstal obsah omnichannel zpráv, seznam
 
 ## 6. Zabezpečení — co je skutečně zavedené
 
-**Šifrované v databázi** (`encrypt()` z `utils/encryption.js`, klíč `ENCRYPTION_KEY`): SIP hesla (`DeviceBinding.sipPassword`, `SipTrunk`) a `Profile.credentials`.
+**Šifrované v databázi**, dvěma různými klíči:
+
+- `Profile.credentials` — `encrypt()` z `utils/encryption.js`, klíč `ENCRYPTION_KEY`.
+- SIP hesla (`DeviceBinding.sipPassword`, `SipTrunk`) — `services/sipEncryption.js`, klíč **`SIP_ENCRYPTION_KEY`** (hex o 64 znacích, jinou délku funkce odmítne).
 
 **Nešifrované v databázi:** obsah zpráv, telefonní čísla, jména, polohové body, blacklist, poznámky. Chrání je přístup k databázi a aplikační autorizace, ne šifrování na úrovni sloupců.
 

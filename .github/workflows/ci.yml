@@ -818,7 +818,13 @@ jobs:
         run: bash scripts/relay-field-test.sh
         env:
           # Relay phone identity — no Bearer token, only installationId + secret
-          API_BASE_URL:            ${{ secrets.API_BASE_URL }}
+          #
+          # Přípona /api je tady schválně. Secret API_BASE_URL se drží BEZ ní,
+          # protože rozvoz APK výš i backend (vultrRoutes.js) si /api dopisují
+          # sami. Tenhle skript a audit-operational-health.js ho naopak čekají
+          # jako součást adresy — mají výchozí hodnoty končící /api. Dopsáním
+          # tady se obě skupiny spotřebitelů přestanou hádat o jednu hodnotu.
+          API_BASE_URL:            ${{ secrets.API_BASE_URL }}/api
           RELAY_INSTALLATION_ID:   ${{ secrets.RELAY_INSTALLATION_ID }}
           RELAY_PROFILE_ID:        ${{ secrets.RELAY_PROFILE_ID }}
           DEVICE_SECRET:           ${{ secrets.NEXUS_DEVICE_SECRET }}
@@ -831,7 +837,8 @@ jobs:
       - name: Run strict operational health smoke
         run: node server/scripts/audit-operational-health.js
         env:
-          OPS_API_BASE_URL:           ${{ secrets.API_BASE_URL }}
+          # Totéž co výš: skript čeká adresu včetně /api, secret ji nemá.
+          OPS_API_BASE_URL:           ${{ secrets.API_BASE_URL }}/api
           # App Owner login for /admin/operational-health (admin endpoint)
           OPS_OWNER_EMAIL:            ${{ secrets.TEST_OWNER_EMAIL }}
           OPS_OWNER_PASSWORD:         ${{ secrets.TEST_OWNER_PASSWORD }}
