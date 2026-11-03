@@ -204,6 +204,7 @@ Audit nehlídá, ale backend je potřebuje, takže do `.env` patří taky:
 | --- | --- |
 | `API_BASE_URL` | **bez `/api` na konci.** `server/src/routes/vultrRoutes.js` z ní skládá odkazy ke stažení APK a OTA jako `${API_BASE_URL}/api/vultr/…`. Když chybí, použije se zapsaná výchozí hodnota `https://nexus-api.myvnc.com`, tedy adresa zaniklého serveru — a aktualizace by odkazovaly tam. Změna stejnojmenného GitHub secretu v oddílu 8 tuhle proměnnou na server **nezapíše**. |
 | `SIP_ENCRYPTION_KEY` | hex o 64 znacích; chrání SIP hesla. Potřeba jen když používáte SIP. |
+| `ALLOWED_ORIGINS` | **Bez ní web na vlastní doméně z API nic nedostane.** Allowlist CORS v `server/src/app.js` je tato proměnná plus pevně zapsané `*.firebaseapp.com` / `*.web.app` a Capacitor `localhost`. Vlastní doména v něm není, takže požadavek z ní skončí 403 — a v prohlížeči to vypadá jako chyba přihlášení, ne jako CORS. Oddělte čárkou, bez mezer. |
 
 ```bash
 cd /root/nexus-backend
@@ -214,6 +215,7 @@ cd /root/nexus-backend
   echo "ENCRYPTION_KEY=$(openssl rand -base64 48)"
   echo "SIP_ENCRYPTION_KEY=$(openssl rand -hex 32)"
   echo "API_BASE_URL=https://vase-domena.cz"
+  echo "ALLOWED_ORIGINS=https://vase-domena.cz"
   echo "PORT=3000"
   echo "NODE_ENV=production"
 } > .env
@@ -221,6 +223,21 @@ chmod 600 .env
 ```
 
 `SIP_ENCRYPTION_KEY` se generuje `-hex 32`, ne `-base64` — `sipEncryption.js` vyžaduje přesně 64 hexadecimálních znaků a jinou délku odmítne.
+
+Do `ALLOWED_ORIGINS` patří adresa **webu**, ne API. Když web běží na `https://example.eu`
+a API na `https://api.example.eu`, je tam ta první. Backend od 3. 11. 2026 při startu
+v produkci varuje, když v té proměnné není žádný `https://` origin — v logu
+(`pm2 logs`) hledejte `ALLOWED_ORIGINS neobsahuje`.
+
+Ověření, že CORS pouští web a nepouští cizí doménu:
+
+```bash
+for O in https://vase-domena.cz https://cizi.example.com; do
+  printf "%s -> HTTP %s\n" "$O" "$(curl -s -o /dev/null -w '%{http_code}' -H "Origin: $O" https://api.vase-domena.cz/api/auth/me)"
+done
+```
+
+Web musí dostat `401` (CORS prošel, chybí jen přihlášení), cizí doména `403`.
 
 Stripe klíče a `APK_DEPLOY_TOKEN` do `.env` dopisuje samo nasazení z GitHub secretů — ty tam ručně nedávejte.
 

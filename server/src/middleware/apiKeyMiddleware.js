@@ -44,7 +44,12 @@ const apiKeyAuth = async (req, res, next) => {
     }
 
     // 4. Check Agency Plan OR Feature Add-on
-    const allowedPlans = ['Agency', 'Professional', 'Enterprise'];
+    // Tarify s pristupem k Developer API. Musi se shodovat s `hasApiAccess`
+    // v client/src/components/Views/ApiSettingsView.jsx a s vyctem funkci
+    // v GET /api/subscriptions/plans, kde "Developer API pristup" patri
+    // vyhradne tarifu Agency. Driv tu byl i Professional — server tedy pustil
+    // klic, ktery si UI vubec nedovolilo vygenerovat a produkt neprodava.
+    const allowedPlans = ['Agency', 'Enterprise'];
     const currentPlan = apiKeyRecord.agency.plan || apiKeyRecord.agency.tier;
     
     let hasAccess = allowedPlans.includes(currentPlan);
