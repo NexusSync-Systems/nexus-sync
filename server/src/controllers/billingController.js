@@ -1,4 +1,5 @@
 const prisma = require('../services/db');
+const { webAppUrl } = require('../utils/publicUrls');
 const logger = require('../services/logger');
 // isEffectiveAdmin se requiruje lazy uvnitř handlerů — roleController ↔ auditController
 // mají cyklus a top-level require by rozbil pořadí načítání (isEffectiveAdmin undefined).
@@ -159,9 +160,30 @@ class BillingController {
     return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
   }
 
+  // Zalozni adresa pro navrat ze Stripe. V bezne situaci se nepouzije — klient
+  // posila `successUrl: window.location.href` (PlansDashboard.jsx a dalsi),
+  // takze navrat jde za prohlizecem. Zalohu potrebuje jen volani, ktere adresu
+  // neposlalo.
+  //
+  // Driv tu byla zapsana `https://nexus-sync-8d50b.web.app/settings`, tedy
+  // jmeno odvozene od Firebase projektu. Prestehovani webu by z ni udelalo
+  // odkaz nikam — a poznalo by se to az ve chvili, kdy se nekdo vraci z platby.
+  // Bere se proto z `webAppUrl()`, tedy z APP_URL nebo z ALLOWED_ORIGINS.
+  zalozniAdresaNavratu() {
+    const zaklad = webAppUrl();
+    if (!zaklad) {
+      // Relativni ani prazdna adresa Stripe neprojde, a poslat uzivatele na
+      // zanikly host je horsi nez selhat nahlas.
+      throw new Error(
+        'Nelze sestavit navratovou adresu pro Stripe: klient neposlal successUrl ' +
+        'a server nema APP_URL ani https origin v ALLOWED_ORIGINS.'
+      );
+    }
+    return `${zaklad}/settings`;
+  }
+
   checkoutUrl(baseUrl, status) {
-    const fallback = 'https://nexus-sync-8d50b.web.app/settings';
-    const url = baseUrl || fallback;
+    const url = baseUrl || this.zalozniAdresaNavratu();
     const separator = url.includes('?') ? '&' : '?';
     return status === 'success'
       ? `${url}${separator}checkout=success&session_id={CHECKOUT_SESSION_ID}`
@@ -169,7 +191,7 @@ class BillingController {
   }
 
   portalReturnUrl(baseUrl) {
-    return baseUrl || 'https://nexus-sync-8d50b.web.app/settings';
+    return baseUrl || this.zalozniAdresaNavratu();
   }
 
   safeJson(value, fallback = {}) {

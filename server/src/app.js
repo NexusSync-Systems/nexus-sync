@@ -158,53 +158,15 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' } // Allow APK downloads
 }));
 
-// CORS: restrict to known origins
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
-  .split(',')
-  .map(o => o.trim())
-  .filter(Boolean);
+// CORS: seznam povolenych originu je v utils/corsOrigins.js, spolecne
+// se Socket.IO. Driv byly dva a rozchazely se — viz komentar v tom souboru.
+const { originPovolen, varujKdyzChybiWebOrigin } = require('./utils/corsOrigins');
 
-// Bez ALLOWED_ORIGINS projde z prohlizece jen firebase.app/web.app a Capacitor
-// localhost — web na vlastni domene dostane 403, ktere v UI vypada jako chyba
-// prihlaseni. Tohle se stalo 3. 11. 2026 na novem serveru, tak ted aspon krici.
-if (process.env.NODE_ENV === 'production' && !allowedOrigins.some(o => o.startsWith('https://'))) {
-  logger.warn(
-    'ALLOWED_ORIGINS neobsahuje zadny https origin — web na vlastni domene ' +
-    'dostane z API 403 (CORS). Nastav napr. ALLOWED_ORIGINS=https://example.eu'
-  );
-}
-
-// Capacitor Android/iOS WebView always uses these origins — must be unconditionally allowed.
-const CAPACITOR_ORIGINS = [
-  'https://localhost',
-  'http://localhost',
-  'capacitor://localhost'
-];
-
-// Dev-only origins (not allowed in production)
-if (process.env.NODE_ENV !== 'production') {
-  CAPACITOR_ORIGINS.push('http://localhost:5173', 'http://localhost:3000');
-}
+varujKdyzChybiWebOrigin();
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (mobile app, curl)
-    if (!origin) return callback(null, true);
-    
-    // Exact allowlist for Firebase domains
-    const FIREBASE_ORIGINS = [
-      'https://nexus-hub.firebaseapp.com',
-      'https://nexus-hub.web.app',
-      'https://nexus-sync-8d50b.firebaseapp.com',
-      'https://nexus-sync-8d50b.web.app'
-    ];
-    
-    // Always allow known patterns
-    const isAllowed = allowedOrigins.includes(origin) || 
-                      FIREBASE_ORIGINS.includes(origin) ||
-                      CAPACITOR_ORIGINS.includes(origin);
-
-    if (isAllowed) {
+    if (originPovolen(origin)) {
       callback(null, true);
     } else {
       logger.warn(`CORS Blocked for origin: ${origin}`);
