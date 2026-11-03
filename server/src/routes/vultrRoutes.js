@@ -33,6 +33,8 @@ const AGENT_DOWNLOADS = [
 ];
 
 // ── APK Upload (multer) ───────────────────────────────────────────────────────
+const { apiBaseUrl } = require("../utils/publicUrls");
+
 const DOWNLOADS_DIR = path.join(__dirname, "../../public/downloads");
 if (!fs.existsSync(DOWNLOADS_DIR)) fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
 
@@ -158,7 +160,7 @@ router.get("/apk-info", async (req, res) => {
     packageName: meta.packageName || "",
     size: meta.size || stat.size,
     uploadedAt: meta.uploadedAt || stat.mtime.toISOString(),
-    downloadUrl: `${process.env.API_BASE_URL || "https://nexus-api.myvnc.com"}/api/vultr/download-${type}.apk`
+    downloadUrl: `${apiBaseUrl()}/api/vultr/download-${type}.apk`
   });
 });
 
@@ -203,7 +205,7 @@ router.get("/download-full.apk", (req, res) => {
 });
 
 router.get("/agent-downloads", async (req, res) => {
-  const baseUrl = (process.env.API_BASE_URL || "https://nexus-api.myvnc.com").replace(/\/+$/, "");
+  const baseUrl = apiBaseUrl();
   const downloads = await Promise.all(AGENT_DOWNLOADS.map(async (item) => {
     const filePath = path.join(DOWNLOADS_DIR, item.filename);
     const meta = await readJsonIfExists(path.join(DOWNLOADS_DIR, `${item.id}.agent.meta.json`));
@@ -414,7 +416,7 @@ router.post("/upload-apk", apkUpload.single("apk"), async (req, res) => {
       filename: baseName,
       size: stat.size,
       uploadedAt: new Date().toISOString(),
-      downloadUrl: `${process.env.API_BASE_URL || "https://nexus-api.myvnc.com"}/api/vultr/download-relay.apk`
+      downloadUrl: `${apiBaseUrl()}/api/vultr/download-relay.apk`
     };
 
     const metaFile = isFull ? "nexus-full.meta.json" : "nexus-relay.meta.json";
@@ -439,7 +441,7 @@ router.post("/upload-agent", (req, res, next) => {
 
   try {
     const stat = await fs.promises.stat(req.file.path);
-    const baseUrl = (process.env.API_BASE_URL || "https://nexus-api.myvnc.com").replace(/\/+$/, "");
+    const baseUrl = apiBaseUrl();
     const meta = {
       platform: target.id,
       filename: target.filename,
@@ -499,7 +501,7 @@ router.post("/upload-ota", otaUpload.single("ota"), async (req, res) => {
   // hlášení verze aplikace, protože web a APK jsou dvě různé věci.
   meta.otaVersion = version;
   meta.otaUploadedAt = new Date().toISOString();
-  meta.otaUrl = `${process.env.API_BASE_URL || "https://nexus-api.myvnc.com"}/downloads/nexus-${varianta}.zip`;
+  meta.otaUrl = `${apiBaseUrl()}/downloads/nexus-${varianta}.zip`;
 
   await fs.promises.writeFile(metaPath, JSON.stringify(meta, null, 2));
   logger.info(`[OTA] Nový webový balík v${version} (${varianta}) nahrán`);

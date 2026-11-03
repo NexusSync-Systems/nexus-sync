@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import * as tokenStore from '../services/tokenStore';
 import axios from "axios";
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://nexus-api.myvnc.com/api';
 
+import { API_BASE } from '../constants/config';
 // Infrastrukturní endpointy smí jen app owner. DashboardHome je ale volal pro
 // každého přihlášeného, takže operátorkám běžela na pozadí smyčka, která se
 // každých 30 vteřin doptávala na 403 — donekonečna, dokud měly otevřenou

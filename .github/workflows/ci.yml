@@ -891,8 +891,12 @@ jobs:
           # Přípona /api je tady schválně. Secret API_BASE_URL se drží BEZ ní,
           # protože rozvoz APK výš i backend (vultrRoutes.js) si /api dopisují
           # sami. Tenhle skript a audit-operational-health.js ho naopak čekají
-          # jako součást adresy — mají výchozí hodnoty končící /api. Dopsáním
-          # tady se obě skupiny spotřebitelů přestanou hádat o jednu hodnotu.
+          # jako součást adresy. Dopsáním tady se obě skupiny spotřebitelů
+          # přestanou hádat o jednu hodnotu.
+          #
+          # relay-field-test.sh od 3. 11. 2026 BEZ téhle proměnné skončí
+          # s kódem 2. Dřív měl zapsanou výchozí adresu na zaniklý server,
+          # takže se tvářil, že má kam volat.
           API_BASE_URL:            ${{ secrets.API_BASE_URL }}/api
           RELAY_INSTALLATION_ID:   ${{ secrets.RELAY_INSTALLATION_ID }}
           RELAY_PROFILE_ID:        ${{ secrets.RELAY_PROFILE_ID }}

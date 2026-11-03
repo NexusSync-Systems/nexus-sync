@@ -72,13 +72,13 @@ Infra/SSH:
 
 Povinne pro produkci:
 
-- `VITE_API_URL`: napr. `https://nexus-api.myvnc.com/api`.
+- `VITE_API_URL`: napr. `https://api.nexusstack.eu/api`. Bez ni klient nema kam mluvit a nahlas to ohlasi do konzole; zapsana zaloha v nem od 3. 11. 2026 neni.
 - `VITE_STRIPE_PUBLISHABLE_KEY`: `pk_live_...`, pokud pouzivate Stripe Checkout fallback pres Stripe.js.
 - `VITE_APP_VERSION`: nastavuje CI build, napr. `v3.79-b123`.
 
 Volitelne:
 
-- `VITE_SIP_WS_URL`: WebSocket URL pro SIP, napr. `wss://nexus-api.myvnc.com:8089/ws`.
+- `VITE_SIP_WS_URL`: WebSocket URL pro SIP, napr. `wss://sip.vase-domena.cz:8089/ws`. Zatim se nenastavuje — Asterisk nikde nebezi, viz `docs/relay-hovory-a-sms.md`.
 - `VITE_APP_VARIANT`: `full` nebo `relay` pro Android/Capacitor build varianty.
 
 ## Android build
@@ -174,7 +174,7 @@ STRICT_RUNTIME_SECRETS=true npm run security:runtime
 - Opakovatelny smoke prikaz bez vypisu tokenu/hodnot:
 
 ```bash
-OPS_API_BASE_URL=https://nexus-api.myvnc.com/api \
+OPS_API_BASE_URL=https://api.nexusstack.eu/api \
 OPS_OWNER_EMAIL=owner@example.com \
 OPS_OWNER_PASSWORD=... \
 STRICT_OPERATIONAL_HEALTH=true \

@@ -41,7 +41,7 @@ V rozhraní Nexus Relay uvidíte ovládací panel:
 *   Zkontrolujte sílu signálu a stav baterie na displeji.
 
 ### 4. Nastavení systému (Settings)
-*   **API Endpoint**: Ujistěte se, že je nastavena adresa `https://nexus-api.myvnc.com`.
+*   **API Endpoint**: Ujistěte se, že je nastavena adresa vašeho backendu (dnes `https://api.nexusstack.eu`). Zapéká se do APK při buildu — v telefonu se přepsat nedá.
 *   **Device ID**: Každý telefon má unikátní ID (např. RELAY-01), podle kterého operátorka pozná, o kterou modelku se jedná.
 
 ---

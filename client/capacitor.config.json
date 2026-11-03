@@ -9,7 +9,6 @@
       "overlaysWebView": true
     },
     "CapacitorUpdater": {
-      "statsUrl": "https://nexus-api.myvnc.com/api/vultr/ota-stats",
       "autoUpdate": false
     },
     "CapacitorHttp": {

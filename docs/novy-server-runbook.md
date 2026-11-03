@@ -202,7 +202,7 @@ Audit nehlídá, ale backend je potřebuje, takže do `.env` patří taky:
 
 | Proměnná | K čemu |
 | --- | --- |
-| `API_BASE_URL` | **bez `/api` na konci.** `server/src/routes/vultrRoutes.js` z ní skládá odkazy ke stažení APK a OTA jako `${API_BASE_URL}/api/vultr/…`. Když chybí, použije se zapsaná výchozí hodnota `https://nexus-api.myvnc.com`, tedy adresa zaniklého serveru — a aktualizace by odkazovaly tam. Změna stejnojmenného GitHub secretu v oddílu 8 tuhle proměnnou na server **nezapíše**. |
+| `API_BASE_URL` | **bez `/api` na konci.** `server/src/routes/vultrRoutes.js` z ní skládá odkazy ke stažení APK a OTA jako `${API_BASE_URL}/api/vultr/…`. Když chybí, server od 3. 11. 2026 **nic nedoplní** — jednou varuje do logu a odkaz zůstane neúplný (`server/src/utils/publicUrls.js`). Dřív se použila zapsaná adresa zaniklého serveru a aktualizace odkazovaly tam. Změna stejnojmenného GitHub secretu v oddílu 8 tuhle proměnnou na server **nezapíše**. |
 | `SIP_ENCRYPTION_KEY` | hex o 64 znacích; chrání SIP hesla. Potřeba jen když používáte SIP. |
 | `ALLOWED_ORIGINS` | **Bez ní web na vlastní doméně z API nic nedostane.** Allowlist CORS v `server/src/app.js` je tato proměnná plus pevně zapsané `*.firebaseapp.com` / `*.web.app` a Capacitor `localhost`. Vlastní doména v něm není, takže požadavek z ní skončí 403 — a v prohlížeči to vypadá jako chyba přihlášení, ne jako CORS. Oddělte čárkou, bez mezer. |
 
@@ -361,7 +361,7 @@ Nasazení dnes používá **přihlášení heslem pod rootem** (`appleboy/ssh-ac
 
 Per-device tajemství se počítá jako HMAC-SHA256 z `installationId` klíčem `DEVICE_SECRET`. Nový `DEVICE_SECRET` tedy znamená, že **žádný stávající telefon se nepřihlásí**.
 
-**Adresa backendu se v aplikaci přepsat nedá.** Bere se z `VITE_API_URL` **v době buildu** (`client/src/context/RelayContext.jsx`, `client/src/constants/config.js`) a když chybí, použije se zapsaná výchozí hodnota `https://nexus-api.myvnc.com/api`, tedy zaniklý server. `configureRelay` tu adresu jen zkopíruje z JS do nativních předvoleb — nevytváří ji, takže v předvolbách přepsat nejde.
+**Adresa backendu se v aplikaci přepsat nedá.** Bere se z `VITE_API_URL` **v době buildu**, a to od 3. 11. 2026 na jediném místě: `client/src/constants/config.js`. Když chybí, build nemá kam mluvit — aplikace ohlásí chybu do konzole a nenačte nic; zapsaná adresa zaniklého serveru už v klientovi není. `configureRelay` tu adresu jen zkopíruje z JS do nativních předvoleb — nevytváří ji, takže v předvolbách přepsat nejde.
 
 Postup je tedy:
 

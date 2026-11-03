@@ -153,9 +153,10 @@ const DocsView = () => {
           <a href="https://console.firebase.google.com/" target="_blank" rel="noreferrer" style={toolCardStyle}>
             <ExternalLink size={18} /> Firebase Console
           </a>
-          <a href="https://nexus-api.myvnc.com/api/docs" target="_blank" rel="noreferrer" style={toolCardStyle}>
-            <FileCode size={18} /> API Dokumentace
-          </a>
+          {/* Odkaz na /api/docs tu býval se zapsaným zaniklým hostem. Swagger je
+              navíc v produkci záměrně vypnutý (app.js: NODE_ENV !== 'production'),
+              takže by nevedl nikam ani se správnou adresou. Popis veřejného API
+              je od #148 přímo v aplikaci: Developer API → Dokumentace. */}
         </div>
       </section>
     </div>

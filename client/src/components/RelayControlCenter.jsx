@@ -4,6 +4,20 @@ import { Smartphone, Info, Globe, ShieldCheck, MapPin, X, Radio, Server, Lock } 
 import { useNexus } from '../context/ContextHook';
 import TrunkManager from './sip/TrunkManager';
 
+
+// Operátorkám se tu zobrazoval zapsaný `nexus-api.myvnc.com` — server, který
+// 3. 11. 2026 zanikl, a Asterisk zatím neběží nikde (viz
+// docs/relay-hovory-a-sms.md). Zobrazit mrtvé jméno je horší než přiznat, že
+// hodnota není nastavená: podle toho prvního by se dala nastavit cizí ústředna.
+const SIP_HOST = (() => {
+  const url = (import.meta.env.VITE_SIP_WS_URL || '').trim();
+  if (!url) return '';
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+})();
 const RelayControlCenter = () => {
   const nexus = useNexus();
   const { 
@@ -36,7 +50,7 @@ const RelayControlCenter = () => {
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: '1.5rem', marginBottom: '3rem' }}>
         <div className="glass-card" style={{ padding: '1.5rem', borderLeft: '4px solid var(--accent-color)' }}>
           <div style={{ fontSize: '0.7rem', fontWeight: '800', color: 'var(--text-secondary)', letterSpacing: '0.1em', marginBottom: '0.5rem' }}>SIP SERVER</div>
-          <code style={{ fontSize: '1.1rem', fontWeight: '900', color: 'white' }}>nexus-api.myvnc.com</code>
+          <code style={{ fontSize: '1.1rem', fontWeight: '900', color: 'white' }}>{SIP_HOST || 'nenastaveno'}</code>
         </div>
         <div className="glass-card" style={{ padding: '1.5rem', borderLeft: '4px solid var(--success-color)' }}>
           <div style={{ fontSize: '0.7rem', fontWeight: '800', color: 'var(--text-secondary)', letterSpacing: '0.1em', marginBottom: '0.5rem' }}>VOIP NODES</div>
@@ -158,7 +172,7 @@ const RelayControlCenter = () => {
           <div className="glass-card" style={{ padding: '1.5rem' }}>
             <div style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>ASTERISK HOST</div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <code style={{ fontSize: '1rem', color: 'white' }}>nexus-api.myvnc.com</code>
+              <code style={{ fontSize: '1rem', color: 'white' }}>{SIP_HOST || 'nenastaveno'}</code>
               <code style={{ fontSize: '0.8rem', color: 'var(--accent-color)' }}>PORT: 5060</code>
             </div>
           </div>

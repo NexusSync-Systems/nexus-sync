@@ -9,7 +9,15 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = path.join(__dirname, '../dist');
-const API_URL = 'https://nexus-api.myvnc.com/api/vultr/upload-ota'; // Update to your real API URL
+// Adresa se nezapisuje. Zapsaná hodnota tu mířila na server, který 3. 11. 2026
+// zanikl, a komentář „Update to your real API URL" to nikomu nepřipomněl.
+const API_BASE = (process.env.API_BASE_URL || process.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+if (!API_BASE) {
+  console.error('Chybí API_BASE_URL (nebo VITE_API_URL). Např.:');
+  console.error('  API_BASE_URL=https://api.example.eu node client/scripts/deploy-ota.js');
+  process.exit(1);
+}
+const API_URL = `${API_BASE.replace(/\/api$/, '')}/api/vultr/upload-ota`;
 
 // Varianta se PŘEDÁVÁ, nehádá. Skript dřív pouštěl holé `npm run build`, takže
 // vznikl balík plné aplikace — jenže se jmenoval nexus-relay.zip a mířil na

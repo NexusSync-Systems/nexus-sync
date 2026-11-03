@@ -16,7 +16,7 @@
 #   ./scripts/relay-field-test.sh
 #
 # Required env vars (or set in .env):
-#   API_BASE_URL              e.g. https://nexus-api.myvnc.com/api
+#   API_BASE_URL              povinna, napr. https://api.example.eu/api
 #   DEVICE_SECRET             shared relay secret (NEXUS_DEVICE_SECRET on server)
 #   RELAY_INSTALLATION_ID     installationId of the relay phone
 #   RELAY_PROFILE_ID          profile the phone is bound to (e.g. ldn-01)
@@ -40,7 +40,13 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 # ─── Config ──────────────────────────────────────────────────────────────────
-API_BASE="${API_BASE_URL:-https://nexus-api.myvnc.com/api}"
+# Zapsaná výchozí adresa tu mířila na server, který 3. 11. 2026 zanikl — test
+# by se tvářil, že má kam volat. Bez proměnné proto skončí hned.
+API_BASE="${API_BASE_URL:-}"
+if [ -z "$API_BASE" ]; then
+  echo "CHYBI API_BASE_URL, napr. https://api.example.eu/api" >&2
+  exit 2
+fi
 API_BASE="${API_BASE%/}"
 
 DEVICE_SECRET="${DEVICE_SECRET:-}"

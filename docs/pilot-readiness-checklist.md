@@ -32,9 +32,17 @@ Podle `docs/production-secrets-runbook.md` overte:
 - Firebase push je nakonfigurovany.
 - Telegram alerty jsou nakonfigurovane nebo vedome vypnute.
 - `REQUIRE_STRIPE_CONFIG=true`, pokud ma byt v pilotu aktivni platba kartou.
+- `netlify.toml` nesmi mit v kontextech `deploy-preview` a `branch-deploy`
+  `VITE_API_URL` produkcniho API. Od 3. 11. 2026 ho tam ma zamerne: nahledy
+  pull requestu musely zacit fungovat a databaze byla prazdna, takze nemely co
+  poskodit. S realnymi uzivateli by ale nahled z libovolneho pull requestu
+  zapisoval do jejich dat. Bud postavte testovaci backend podle
+  `docs/testovaci-prostredi.md` a prepnete adresu na nej (`VITE_NEXUS_ENVIRONMENT`
+  na `staging`), nebo tu promennou z obou kontextu odeberte.
 
 Go/no-go:
 
+- No-go, pokud nahledy na Netlify stale miri na produkcni API.
 - No-go, pokud produkce pouziva test Stripe keys omylem.
 - No-go, pokud `STRIPE_SECRET_KEY` existuje, ale chybi `STRIPE_WEBHOOK_SECRET`.
 - No-go, pokud nejsou nastavene startup secrets a backend by spadl po restartu.

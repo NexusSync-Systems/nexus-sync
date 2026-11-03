@@ -57,7 +57,7 @@ The primary module for client communication.
 The Nexus Relay app acts as a bridge between your devices and the Nexus Hub cloud system. For proper operation, it must be installed on a stable Android device.
 Nexus Hub features a proprietary gateway app for 24/7 synchronization without needing third-party tools like Automate or Tasker.
 
-- **Download APK**: [Nexus Relay (Private Server)](https://nexus-api.myvnc.com/downloads/nexus-relay.apk) *(Recommended for stability)*
+- **Download APK**: from the **Downloads** section inside the app *(Recommended for stability)*. The link is deliberately not written here — the server builds it from its own address, so it survives a backend move.
 - **Features**: 
   - Integrated SMS Intercepting
   - Real-time Call State Notifications

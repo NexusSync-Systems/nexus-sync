@@ -2,33 +2,58 @@
   command = "cd client && npm install --legacy-peer-deps && npm run build"
   publish = "client/dist"
 
-# Náhledy pull requestů.
+# ── Náhledy pull requestů ────────────────────────────────────────────────────
 #
-# Frontend je z pull requestu, ale API je pořád PRODUKČNÍ — klient bez
-# nastaveného VITE_API_URL spadne na zadrátovanou výchozí hodnotu
-# https://nexus-api.myvnc.com/api. Náhled tedy vypadá jako pískoviště
-# a přitom maže a odesílá doopravdy.
+# K čemu to je: Netlify postaví z každého pull requestu funkční kopii webové
+# aplikace na vlastní adrese, aby se změna dala proklikat ještě před sloučením.
 #
-# Než bude stát testovací backend, aspoň to musí být vidět: pruh dole
-# varuje, že jsou data ostrá.
+# Frontend je tedy z pull requestu, ale API je PRODUKČNÍ. Náhled vypadá jako
+# pískoviště, a přitom maže a odesílá doopravdy. Proto se dole ukazuje červený
+# pruh `NÁHLED ZMĚN — POZOR, PRACUJETE S OSTRÝMI DATY`
+# (`client/src/components/EnvironmentBadge.jsx`).
+#
+# Adresa se tu od 3. 11. 2026 nastavuje VÝSLOVNĚ. Dřív se nenastavovala vůbec
+# a klient spadl na zapsanou výchozí hodnotu `https://nexus-api.myvnc.com/api`
+# — server, který toho dne zanikl. Náhledy tedy mířily na mrtvý stroj, a nikdo
+# si toho nevšiml, protože build i nasazení proběhly úspěšně. Zapsaná adresa
+# v klientovi už neexistuje: bez téhle proměnné náhled nahlas ohlásí chybu
+# a nenačte nic (`client/src/constants/config.js`).
+#
+# POZOR, tohle je dočasné. Dokud je databáze prázdná a pilot nezačal, nemá
+# náhled co poškodit. Jakmile pilot začne, zapisoval by do dat skutečných lidí.
+# Hlídá to brána 2 (Secrets and environment gate) v
+# `docs/pilot-readiness-checklist.md` jako no-go.
 [context.deploy-preview.environment]
+  VITE_API_URL = "https://api.nexusstack.eu/api"
   VITE_NEXUS_ENVIRONMENT = "preview"
 
 [context.branch-deploy.environment]
+  VITE_API_URL = "https://api.nexusstack.eu/api"
   VITE_NEXUS_ENVIRONMENT = "preview"
 
-# ── Až poběží testovací backend ────────────────────────────────────────────
-# Odkomentuj řádky níž a v obou blocích výš přepiš hodnotu na "staging".
-# Teprve pak náhledy přestanou sahat na ostrá data. Postup je v
-# docs/testovaci-prostredi.md.
+# ── Produkční kontext Netlify zde ZÁMĚRNĚ není ───────────────────────────────
 #
-# [context.deploy-preview.environment]
-#   VITE_API_URL = "https://nexus-test-api.myvnc.com/api"
-#   VITE_NEXUS_ENVIRONMENT = "staging"
+# `nexus-sync.netlify.app` staví z masteru a je to druhá veřejná kopie
+# aplikace; ostrý web běží na `nexusstack.eu` (Firebase hosting). Nastavit tu
+# adresu API by znamenalo mít dvě funkční veřejné instance téže aplikace, a to
+# nikdo nechtěl — je to zbytek po přechodu na Firebase.
 #
-# [context.branch-deploy.environment]
-#   VITE_API_URL = "https://nexus-test-api.myvnc.com/api"
-#   VITE_NEXUS_ENVIRONMENT = "staging"
+# Bez proměnné ta stránka nahlas ohlásí chybu a nenačte data, což je pro
+# nasazení, které se nemá používat, poctivější než tiše fungovat. Jestli se
+# Netlify nemá používat vůbec, patří ten projekt zrušit v Netlify samotném —
+# z repozitáře to udělat nejde.
+
+# ── Až poběží testovací backend ──────────────────────────────────────────────
+#
+# Cílový stav podle `docs/testovaci-prostredi.md`: druhá kopie backendu
+# s vlastní databází, kam náhledy můžou zapisovat bez následků. Potom se tady
+# přepíše `VITE_API_URL` na jeho adresu a `VITE_NEXUS_ENVIRONMENT` na
+# "staging" — pruh se tím změní na oranžový `DATA NEJSOU OSTRÁ`.
+#
+# Postup v tom dokumentu je napsaný pro zaniklý server (`nexus-test-api.myvnc.com`,
+# `STAGING_*` secrety, certbot pro tu doménu) a je potřeba ho přepsat pro
+# `api.nexusstack.eu`. Na současném stroji je to otázka ~150 MB RAM z 952
+# a jedné poddomény s certifikátem.
 
 [[redirects]]
   from = "/*"

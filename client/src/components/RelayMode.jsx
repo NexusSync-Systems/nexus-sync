@@ -35,6 +35,7 @@ import { useNexus } from '../context/ContextHook';
 import { useSocketBridge } from '../services/socketBridge';
 import { useFeatureLock } from '../config/featureLocks';
 
+import { SERVER_ORIGIN } from '../constants/config';
 function relayDebug(...args) {
   console.info('[Relay]', ...args);
 }
@@ -56,7 +57,7 @@ const RelayMode = ({ operator, t, onHide: _onHide, onExit, syncPushToken, isSync
     setLang
   } = nexus || {};
 
-  const RELAY_API_BASE = (import.meta.env.VITE_API_URL || 'https://nexus-api.myvnc.com/api').replace(/\/api$/, '');
+  const RELAY_API_BASE = SERVER_ORIGIN;
 
   // Reaktivně, ne jednorázovým čtením: secret přichází až z /device/verify.
   const relaySecret = tokenStore.useRelaySecret() || '';

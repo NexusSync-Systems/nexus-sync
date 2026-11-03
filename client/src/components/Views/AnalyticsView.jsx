@@ -4,6 +4,7 @@ import { DollarSign, Calendar, MessageSquare, TrendingUp, Users, Activity, Lock 
 import { useNexus } from '../../context/ContextHook';
 import PinModal from '../Modals/PinModal';
 
+import { API_BASE } from '../../constants/config';
 const AnalyticsView = () => {
   const nexus = useNexus();
   const { 
@@ -25,7 +26,7 @@ const AnalyticsView = () => {
   const handleUpgrade = async () => {
     setIsUpgrading(true);
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'https://nexus-api.myvnc.com/api'}/billing/checkout`, {
+      const response = await fetch(`${API_BASE}/billing/checkout`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

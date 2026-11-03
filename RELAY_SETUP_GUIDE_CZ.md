@@ -50,8 +50,15 @@ Můžeš simulovat, že na telefon přišla SMS a otestovat, zda se zobrazí v D
 ### Test SMS (simulace Nexus Relay):
 Spusť tento příkaz v terminálu (nahraď URL svou adresou a deviceId platným ID operátora):
 
+
+Adresa API se sem nezapisuje — nastav si ji do proměnné, aby postup platil i po stěhování serveru:
+
 ```bash
-curl -X POST https://nexus-api.myvnc.com/api/device/relay \
+export NEXUS_API=https://api.vase-domena.cz/api
+```
+
+```bash
+curl -X POST "$NEXUS_API/device/relay" \
   -H "Content-Type: application/json" \
   -d '{
     "deviceId": "op-01",

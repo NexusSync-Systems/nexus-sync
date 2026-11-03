@@ -6,8 +6,8 @@ import {
 } from 'lucide-react';
 import { useNexus } from '../../context/ContextHook';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://nexus-api.myvnc.com/api';
 
+import { API_BASE } from '../../constants/config';
 const AuditLogsView = () => {
   const { t, token, isMobile } = useNexus();
   const [logs, setLogs] = useState([]);

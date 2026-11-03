@@ -282,7 +282,7 @@ const AgencyDetailModal = ({
                   </div>
                 )}
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', background: 'rgba(59,130,246,0.1)', padding: '0.5rem', borderRadius: '6px' }}>
-                  <strong>Tip:</strong> Při IP Auth nasměrujte svůj SIP Trunk na naši IP <code>nexus-api.myvnc.com</code> (port 5060).
+                  <strong>Tip:</strong> Při IP Auth nasměrujte svůj SIP Trunk na adresu naší ústředny (port 5060). Adresu vám dáme — zapsaná tu být nesmí, protože se stěhováním serveru se mění.
                 </div>
               </div>
             ) : (

@@ -40,7 +40,7 @@ volumes:
   <!-- Forward každou dekódovanou pozici jako JSON na Nexus -->
   <entry key="forward.enable">true</entry>
   <entry key="forward.type">position</entry>
-  <entry key="forward.url">https://nexus-api.myvnc.com/api/trackers/traccar-forward</entry>
+  <entry key="forward.url">https://api.nexusstack.eu/api/trackers/traccar-forward</entry>
   <entry key="forward.json">true</entry>
   <entry key="forward.header">x-forward-secret: ZMĚŇ_MĚ_dlouhé_náhodné_tajemství</entry>
 </properties>

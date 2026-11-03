@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Shield, X, Check, AlertTriangle, Loader2 } from 'lucide-react';
 import { useNexus } from '../../context/ContextHook';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://nexus-api.myvnc.com/api';
 
+import { API_BASE } from '../../constants/config';
 const PinModal = ({ onSuccess, onCancel, title, description }) => {
   const { t, token } = useNexus();
   const [pin, setPin] = useState(['', '', '', '']);
