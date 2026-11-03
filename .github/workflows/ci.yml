@@ -341,6 +341,9 @@ jobs:
       - name: Install client dependencies
         run: cd client && npm install --legacy-peer-deps --prefer-offline --no-audit
 
+      # Tady se adresa backendu záměrně NEnastavuje: tahle úloha staví web
+      # jen proto, aby šly sloučit manifesty, a na ty API adresa nemá vliv.
+      # Kontrola patří do build-android, kde se APK skutečně vyrábí.
       - name: Build web assets and sync Capacitor
         run: |
           cd client
@@ -487,6 +490,36 @@ jobs:
 
       - name: Install client dependencies
         run: cd client && npm install --legacy-peer-deps
+
+      # Adresa backendu se do APK zapéká při buildu. Když VITE_API_URL chybí,
+      # klient padne na hodnotu zapsanou v client/src/constants/config.js
+      # a RelayContext.jsx — a tou je https://nexus-api.myvnc.com/api, tedy
+      # server, který už neexistuje. APK by se postavila, nainstalovala
+      # a mlčky mluvila do prázdna. Proto se to radši zastaví tady.
+      #
+      # Tady se /api PATŘÍ: klient ho má ve své výchozí hodnotě. Secret
+      # API_BASE_URL se naopak drží bez něj, protože backend i rozvoz APK si
+      # ho dopisují samy. Viz docs/novy-server-runbook.md, oddíl 8.
+      #
+      # Zapisuje se do GITHUB_ENV, takže ho dostanou oba APK buildy níž.
+      - name: Zkontrolovat adresu backendu pro APK
+        env:
+          ZAKLAD: ${{ secrets.API_BASE_URL }}
+        run: |
+          if [ -z "$ZAKLAD" ]; then
+            echo "::error::Secret API_BASE_URL není nastavený. APK by mířila na zaniklý nexus-api.myvnc.com."
+            exit 1
+          fi
+          case "$ZAKLAD" in
+            *myvnc.com*)
+              echo "::error::API_BASE_URL míří na myvnc.com, což je zaniklý server."
+              exit 1 ;;
+            */api)
+              echo "::error::API_BASE_URL nesmí končit na /api — jednotlivé úlohy si ho dopisují samy."
+              exit 1 ;;
+          esac
+          echo "VITE_API_URL=${ZAKLAD}/api" >> "$GITHUB_ENV"
+          echo "APK se postaví proti ${ZAKLAD}/api"
 
       - name: Build and Package Full APK
         env:
@@ -767,8 +800,28 @@ jobs:
           node-version: '20'
           cache: 'npm'
           cache-dependency-path: client/package-lock.json
+      # Totéž co u APK: bez VITE_API_URL by se web postavil proti hodnotě
+      # zapsané v client/src/constants/config.js, tedy proti zaniklému
+      # nexus-api.myvnc.com. Nasazený web by se tvářil funkčně a každý
+      # požadavek by skončil chybou sítě.
       - name: Install & Build
+        env:
+          ZAKLAD: ${{ secrets.API_BASE_URL }}
         run: |
+          if [ -z "$ZAKLAD" ]; then
+            echo "::error::Secret API_BASE_URL není nastavený. Web by mířil na zaniklý nexus-api.myvnc.com."
+            exit 1
+          fi
+          case "$ZAKLAD" in
+            *myvnc.com*)
+              echo "::error::API_BASE_URL míří na myvnc.com, což je zaniklý server."
+              exit 1 ;;
+            */api)
+              echo "::error::API_BASE_URL nesmí končit na /api — dopisuje se tady."
+              exit 1 ;;
+          esac
+          export VITE_API_URL="${ZAKLAD}/api"
+          echo "Web se postaví proti ${VITE_API_URL}"
           cd client
           npm install --legacy-peer-deps
           export VITE_APP_VERSION="v$(node -p "require('./package.json').version")-b${{ github.run_number }}"
