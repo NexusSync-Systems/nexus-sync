@@ -105,6 +105,24 @@ look.
 Verified on 3 Nov 2026: the copy on the laptop decrypts and matches the dump on the
 server, checked without involving the server.
 
+Three guarantees the script makes, because a backup tool must not lose data:
+
+- **A finished copy is never replaced by an unverified one.** The download lands
+  under its own staging name, is verified, and only then replaces the previous
+  file. A failed candidate is kept as `VADNY-*`; one that could not be verified
+  at all (no passphrase file, copy already present) is kept as `NEOVERENY-*`. The
+  earlier verified copy stays untouched in both cases.
+- **Two concurrent runs cannot interleave.** A `mkdir` lock (atomic on Linux and
+  macOS) makes the second run exit with a clear message instead of writing into
+  the first run's files.
+- **Retention cannot delete what the run just fetched.** `ZALOHA_PONECHAT` must be
+  an integer ≥ 1 — zero would have passed every archive, including the fresh one,
+  to `rm` and still exited successfully. The published file is also excluded from
+  cleanup by name, so a clock skew that makes another archive look newer cannot
+  delete it either.
+
+Each of these was tested by forcing the failure, not by reading the code.
+
 ### Still missing
 
 - **Nobody is notified.** Markers and the log only help someone who looks. There is
