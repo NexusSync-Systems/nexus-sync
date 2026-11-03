@@ -124,7 +124,38 @@ Spustte po deployi:
 9. Spustit test Stripe Checkout v test-mode.
 10. Overit `/api/admin/operational-health`.
 
-## 9. Rollback plan
+## 9. Legal and data protection gate
+
+Tato brana chybela. Zbyvajicich devet bran overuje, jestli system funguje —
+tahle overuje, jestli ho smime na realnych lidech pustit. Muze zastavit pilot
+i pri technicky bezvadnem stavu, proto patri mezi brany, ne do poznamek.
+
+Vecny podklad je v `docs/zpracovani-osobnich-udaju.md`: inventura udaju, toky,
+treti strany, doby uchovani a deset otazek, ktere musi rozhodnout clovek.
+
+- Existuje pravni zaklad pro kazdou kategorii zpracovani.
+- Zasady ochrany osobnich udaju jsou hotove a verejne dostupne na URL.
+  (Tentyz dokument vyzaduje i Google Play.)
+- Je splnena informacni povinnost vuci subjektum, ktere s nami nemaji vztah:
+  pisatele SMS a osoby na blacklistu.
+- Retencni uloha bezi a doby uchovani jsou odsouhlasene, ne vychozi.
+- Existuje zaznam o cinnostech zpracovani.
+- DPIA je hotova, nebo je zduvodnene, proc neni potreba.
+- Je jasne, kde fyzicky lezi databaze a zalohy, a ktere treti strany dostavaji
+  jake udaje.
+- Je popsany postup pro zadost o export a vymaz udaju konkretni osoby, vcetne
+  odpovedne osoby. System na to nema endpoint, takze to bude rucni.
+- Monitoring vykonu operatorek (`OperatorMetrics`, `OperatorWorkSession`) ma
+  vlastni pravni zaklad a zamestnankyne o nem vedi.
+
+Go/no-go:
+
+- No-go, pokud neexistuje pravni zaklad pro preposilani SMS tretich osob.
+- No-go, pokud chybi verejne zasady ochrany osobnich udaju.
+- No-go, pokud se nemaze nic a data by se hromadila bez lhuty od prvniho dne.
+- No-go, pokud nikdo neni urceny k vyrizovani zadosti subjektu.
+
+## 10. Rollback plan
 
 Frontend:
 
@@ -151,11 +182,11 @@ Android Relay:
 - Pri chybe nove APK vratit predchozi verzi na pilotnim telefonu.
 - Po downgrade znovu overit `DEVICE_SECRET`, verify binding a outbox.
 
-## 10. Pilot go/no-go
+## 11. Pilot go/no-go
 
 Go:
 
-- Vsechny brany 1-8 jsou splnene.
+- Vsechny brany 1-9 jsou splnene.
 - Existuje cerstva overena zaloha.
 - Existuje rollback postup a odpovedna osoba.
 - Pilot je omezeny na maly pocet uzivatelu/profilu.
@@ -167,3 +198,4 @@ No-go:
 - Stripe webhook neaktivuje platbu.
 - Relay ztraci SMS.
 - Monitoring neni dostupny a nikdo nesleduje logy.
+- Chybi pravni zaklad nebo verejne zasady ochrany osobnich udaju.
