@@ -188,11 +188,22 @@ jobs:
       # Sem míří testy proti živému API místo na produkci.
       NEXUS_API_URL: http://localhost:3000/api
       # Zapéká se do buildu klienta, ze kterého `tests/helpers/mocks.js`
-      # servíruje SPA (`client/dist`). Dřív se nenastavovala a klient spadl na
-      # zapsanou výchozí adresu; od 3. 11. 2026 žádná není, takže by `API_BASE`
-      # zůstal prázdný a požadavky by přišly o předponu `/api` — mock by na ně
-      # nesedl a SPA handler by místo JSONu vrátil index.html.
-      VITE_API_URL: http://localhost:3000/api
+      # servíruje SPA (`client/dist`). Bez ní by `API_BASE` zůstal prázdný,
+      # požadavky by přišly o předponu `/api`, mock by na ně nesedl a SPA
+      # handler by místo JSONu vrátil index.html.
+      #
+      # MUSÍ BÝT https a NESMÍ to být localhost. Stránka se testům servíruje
+      # z `https://…` (viz baseURL v playwright.config.js) a WebKit blokuje
+      # smíšený obsah v rendereru — tedy DŘÍV, než se požadavek dostane
+      # k Playwright mockům. S `http://localhost:3000/api` tu padlo 40 testů
+      # ve webkitu a 0 v ostatních prohlížečích; chromium, firefox i mobile
+      # prošly všechny.
+      #
+      # `.invalid` je podle RFC 2606 vyhrazená a nikdy se nepřeloží, takže
+      # požadavek, který mockům unikne, selže nahlas místo aby šel na cizí
+      # stroj. Veškerý provoz v těchto testech je mockovaný; tahle adresa
+      # se nemá nikdy otevřít.
+      VITE_API_URL: https://nexus-e2e.invalid/api
 
     steps:
       - uses: actions/checkout@v4
