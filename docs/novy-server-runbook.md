@@ -363,9 +363,11 @@ Nainstaloval jsem backend, PostgreSQL a nginx. **Asterisk ne**, takže hovory p�
 
 Projevuje se to v klientu takhle: `client/src/components/sip/SipManager.jsx` čte `VITE_SIP_WS_URL`, která se **nikde nenastavuje**, takže padá na zapsané `wss://nexus-api.myvnc.com:8089/ws` — zaniklý server.
 
-Správná hodnota by byla `wss://api.nexusstack.eu:8089/ws`, protože podle `docs/asterisk/setup.sh` běžel Asterisk **na tomtéž stroji jako backend** a WSS na portu 8089 (`docs/asterisk/pjsip.conf`, `[transport-wss]`). **Nenastavujte ji ale dřív, než tam Asterisk skutečně poběží** — jinak klient bude otevírat spojení na port, kde nic neposlouchá, a vypadá to jako chyba aplikace, ne jako chybějící služba.
+Správná hodnota by byla `wss://api.nexusstack.eu:8089/ws`, protože podle `docs/asterisk/setup.sh` běžel Asterisk **na tomtéž stroji jako backend** a WSS na portu 8089 (`docs/asterisk/pjsip.conf`, `[transport-wss]`). Nenastavujte ji ale dřív, než tam Asterisk poběží — jinak to vypadá jako hotová konfigurace, a není.
 
-Co je potřeba udělat, než ta hodnota začne platit:
+**Nenastavení té proměnné ale spojování nevypne**, což jsem tu původně napsal špatně. `wsUrl` má zapsanou výchozí hodnotu, takže je vždy vyplněný; jakmile se přihlásí operátorka s SIP rolí a `GET /api/sip/config` vrátí údaje, JsSIP se spustí a pokusy o spojení selhávají tak či tak. Vypnout SIP by chtělo samostatnou podmínku — podrobněji v `docs/relay-hovory-a-sms.md`.
+
+Co je potřeba udělat, než ta hodnota začne platit (**není to krok za krokem** — úplný postup ověřený na novém serveru zatím neexistuje, podklady jsou v [docs/asterisk/](asterisk/)):
 
 1. **Nainstalovat Asterisk** — `docs/asterisk/setup.sh` je na to napsaný, ale pozor: s `--domain` spouští `certbot certonly --standalone`, a to **obsadí port 80**, na kterém běží nginx. Certifikát pro `api.nexusstack.eu` navíc už existuje v `/etc/letsencrypt/live/`, takže ho stačí Asterisku nasměrovat (`cert_file` a `priv_key_file` v `pjsip.conf`) a certbot nepouštět vůbec.
 2. **Otevřít port 8089** — a to **ve dvou vrstvách**: v bezpečnostním seznamu u Oracle i v lokálním iptables, který na tom obrazu pouští jen 22, 80 a 443. Viz oddíl 6.

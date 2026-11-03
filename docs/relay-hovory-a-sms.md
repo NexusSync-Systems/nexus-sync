@@ -126,10 +126,24 @@ na řadu přijdou.
 
 Na novém serveru Asterisk **není** — běží tam jen backend, PostgreSQL a nginx.
 `SipManager.jsx` proto padá na zapsané `wss://nexus-api.myvnc.com:8089/ws`, což je
-zaniklý server. `VITE_SIP_WS_URL` se záměrně nenastavuje, dokud Asterisk někde
-nepoběží: klient by jinak otvíral spojení na port, kde nic neposlouchá, a vypadalo
-by to jako chyba aplikace místo chybějící služby. Postup zprovoznění je
-v `docs/novy-server-runbook.md`, oddíl 10.
+zaniklý server.
+
+**Pozor na to, co nenastavení `VITE_SIP_WS_URL` NEDĚLÁ: nevypne spojování.**
+`wsUrl` je vždy vyplněný, protože má zapsanou výchozí hodnotu. Jakmile se přihlásí
+operátorka s SIP rolí a `GET /api/sip/config` vrátí údaje, `useOperatorSip`
+podmínkou `if (!config?.wsUrl || !config?.username || !config?.password) return;`
+projde a JsSIP se spustí. Pokusy o spojení tedy probíhají a selhávají — ať je
+v adrese starý host, nebo nový, kde nic neposlouchá.
+
+Proměnnou proto nenastavujeme jen proto, aby nová adresa nevypadala jako hotová
+konfigurace. **Skutečné vypnutí SIP by chtělo samostatnou podmínku** — nejčistěji
+tak, aby backend údaje nevydal, dokud Asterisk není nasazený, nebo explicitním
+přepínačem. Dnes to nemá ani jedno.
+
+Předpoklady zprovoznění jsou v `docs/novy-server-runbook.md`, oddíl 10, a vlastní
+podklady pro server (`setup.sh`, `pjsip.conf`, `extensions.conf`) v
+[docs/asterisk/](asterisk/). **Úplný postup zprovoznění ověřený na novém serveru
+zatím neexistuje** — oddíl 10 vyjmenovává, co je potřeba, ne krok za krokem.
 
 ### Rozhodnutí: vlastní Asterisk, ne hostovaná CPaaS
 
@@ -138,13 +152,19 @@ Klient je na Asterisk **nevázaný** — `useOperatorSip` používá JsSIP a pot
 (Twilio, Vonage a podobně) bez zásahu do klienta; navázaný je server, kde
 `asteriskConfigGenerator` skládá konfiguraci a nasazuje ji přes SSH.
 
-Přesto volíme vlastní Asterisk, a to kvůli kontrole nad hovory:
+Přesto volíme vlastní Asterisk, a to kvůli kontrole nad hovory. Co tím skutečně
+získáme:
 
-- média netečou přes servery třetí strany,
-- nikdo cizí neuchovává metadata o tom, kdo komu volal a jak dlouho,
-- zůstáváme **správcem** místo vztahu se zpracovatelem — a u amerického
-  poskytovatele i mimo otázku přenosu údajů mimo EU, viz
-  `docs/zpracovani-osobnich-udaju.md`.
+- **o jednoho poskytovatele telefonní platformy méně** v cestě hovoru,
+- média netečou přes jeho servery,
+- neuchovává metadata o tom, kdo komu volal a jak dlouho.
+
+Co z toho naopak **neplyne samo** a co tu proto netvrdíme: vlastní hosting
+neurčuje, jestli jsme správce nebo zpracovatel, ani sám nevylučuje přenos údajů
+mimo EU. Obojí závisí na skutečném uspořádání a na tom, kde infrastruktura leží —
+a `docs/zpracovani-osobnich-udaju.md` má roli správce jako **otevřenou otázku č. 1**
+pro právní revizi a umístění databáze i záloh jako **nezjištěné**. Tenhle dokument
+to nerozhoduje.
 
 ### Co tím ale NEZÍSKÁME, ať to nikdo nečeká
 
