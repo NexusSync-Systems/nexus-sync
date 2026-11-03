@@ -115,6 +115,89 @@ v `local.properties` nebo jako proměnnou prostředí. Manifest tím hradlí
 **jen** `NexusInCallService`; fantomové hovory (`NexusGhostCallActivity`)
 na něm nezávisí, ty jedou přes FCM a full-screen intent.
 
+## Kde má Asterisk běžet, a proč ne hostovaná služba
+
+**Pro pilot to řešit nemusíš.** `docs/pilot-readiness-checklist.md` nezmiňuje SIP,
+hovory ani Asterisk ani jednou; brána 5 je celá o SMS, a ty na hovorech nezávisí.
+Tahle sekce existuje proto, aby se rozhodnutí nemuselo hledat znovu, až hovory
+na řadu přijdou.
+
+### Stav k 3. 11. 2026
+
+Na novém serveru Asterisk **není** — běží tam jen backend, PostgreSQL a nginx.
+`SipManager.jsx` proto padá na zapsané `wss://nexus-api.myvnc.com:8089/ws`, což je
+zaniklý server.
+
+**Pozor na to, co nenastavení `VITE_SIP_WS_URL` NEDĚLÁ: nevypne spojování.**
+`wsUrl` je vždy vyplněný, protože má zapsanou výchozí hodnotu. Jakmile se přihlásí
+operátorka s SIP rolí a `GET /api/sip/config` vrátí údaje, `useOperatorSip`
+podmínkou `if (!config?.wsUrl || !config?.username || !config?.password) return;`
+projde a JsSIP se spustí. Pokusy o spojení tedy probíhají a selhávají — ať je
+v adrese starý host, nebo nový, kde nic neposlouchá.
+
+Proměnnou proto nenastavujeme jen proto, aby nová adresa nevypadala jako hotová
+konfigurace. **Skutečné vypnutí SIP by chtělo samostatnou podmínku** — nejčistěji
+tak, aby backend údaje nevydal, dokud Asterisk není nasazený, nebo explicitním
+přepínačem. Dnes to nemá ani jedno.
+
+Předpoklady zprovoznění jsou v `docs/novy-server-runbook.md`, oddíl 10, a vlastní
+podklady pro server (`setup.sh`, `pjsip.conf`, `extensions.conf`) v
+[docs/asterisk/](asterisk/). **Úplný postup zprovoznění ověřený na novém serveru
+zatím neexistuje** — oddíl 10 vyjmenovává, co je potřeba, ne krok za krokem.
+
+### Rozhodnutí: vlastní Asterisk, ne hostovaná CPaaS
+
+Klient je na Asterisk **nevázaný** — `useOperatorSip` používá JsSIP a potřebuje jen
+`{ wsUrl, username, password }`. Technicky by tedy fungovala i hostovaná služba
+(Twilio, Vonage a podobně) bez zásahu do klienta; navázaný je server, kde
+`asteriskConfigGenerator` skládá konfiguraci a nasazuje ji přes SSH.
+
+Přesto volíme vlastní Asterisk, a to kvůli kontrole nad hovory. Co tím skutečně
+získáme:
+
+- **o jednoho poskytovatele telefonní platformy méně** v cestě hovoru,
+- média netečou přes jeho servery,
+- neuchovává metadata o tom, kdo komu volal a jak dlouho.
+
+Co z toho naopak **neplyne samo** a co tu proto netvrdíme: vlastní hosting
+neurčuje, jestli jsme správce nebo zpracovatel, ani sám nevylučuje přenos údajů
+mimo EU. Obojí závisí na skutečném uspořádání a na tom, kde infrastruktura leží —
+a `docs/zpracovani-osobnich-udaju.md` má roli správce jako **otevřenou otázku č. 1**
+pro právní revizi a umístění databáze i záloh jako **nezjištěné**. Tenhle dokument
+to nerozhoduje.
+
+### Co tím ale NEZÍSKÁME, ať to nikdo nečeká
+
+**Hovor na veřejné číslo prochází telekomunikačním operátorem vždy.** Kontext
+`[from-trunk]` v `docs/asterisk/extensions.conf` to ukazuje: s externím SIP trunkem
+se počítá. Operátor podléhá povinnostem ohledně zákonných odposlechů ve své
+jurisdikci, a vlastní hosting to nemění — odstraňuje jednu firmu v cestě, ne
+operátora.
+
+„Hovor, který nikdo nemůže odposlechnout" u veřejné telefonie zajistit nelze.
+Operátora nepotkají jen hovory v rámci aplikace (operátorka ↔ operátorka přes
+WebRTC), ty projdou pouze naším Asteriskem.
+
+Co hraje v náš prospěch: **hovory se nenahrávají.** Je to vědomé rozhodnutí
+zapsané v `asteriskConfigGenerator.js` („ZÁMĚRNĚ SE NENAHRÁVÁ: žádný MixMonitor")
+a z hlediska soukromí je to větší páka než volba hostingu. Hostovaný poskytovatel
+by technickou schopnost nahrávat měl, i kdybychom si ji nevyžádali.
+
+### Na samostatný stroj, ne vedle backendu
+
+`asteriskConfigGenerator` nahrává konfiguraci **přes SSH na `VPS_SSH_HOST`**, takže
+je na vzdálený Asterisk napsaný. Na stejném stroji jako backend by se server
+připojoval sám k sobě. Samostatný stroj navíc řeší paměť: Asterisk vedle Node
+a PostgreSQL na 952 MB současného micro je optimistický, zvlášť u WebRTC.
+
+### Co opravit, než se Asterisk někam přestěhuje
+
+`SipManager.jsx` bere přihlašovací údaje z `GET /api/sip/config`, ale **adresu
+WebSocketu ze zapečené `VITE_SIP_WS_URL`**. Server přitom port už zná
+(`ASTERISK_WS_PORT`). Dokud to tak je, znamená každé přestěhování Asterisku novou
+APK — tedy obcházení telefonů. Kdyby `wsUrl` vracelo API spolu s údaji, stačila by
+změna na serveru. Je to tatáž past jako u `VITE_API_URL`, viz #146.
+
 ## Na co si dát pozor
 
 `__APP_VARIANT__` je konstanta dosazená Vitem při buildu — dosazuje se
