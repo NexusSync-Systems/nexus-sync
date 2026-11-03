@@ -4,7 +4,8 @@ const crypto = require('crypto');
 const logger = require('../services/logger');
 const { isEffectiveAdmin } = require('./roleController');
 
-const API_ACCESS_PLANS = new Set(['Agency', 'Professional', 'Enterprise']);
+const { API_ACCESS_DENIED_MESSAGE, agencyHasApiAccess } = require('../utils/apiEntitlement');
+
 const ALLOWED_API_KEY_SCOPES = new Set(['read:stats', 'read:profiles', 'read:messages', 'relay:bridge']);
 
 const normalizeApiKeyScopes = (input) => {
@@ -25,18 +26,6 @@ const normalizeKeyName = (name) => {
   if (name === undefined || name === null || name === '') return 'Default Key';
   if (typeof name !== 'string') return null;
   return name.trim().slice(0, 120) || 'Default Key';
-};
-
-const agencyHasApiAccess = (agency) => {
-  const currentPlan = agency?.plan || agency?.tier;
-  if (API_ACCESS_PLANS.has(currentPlan)) return true;
-
-  try {
-    const features = JSON.parse(agency?.extraFeatures || '{}');
-    return features.api_access === true || features.api_access === 'true';
-  } catch {
-    return false;
-  }
 };
 
 const requireAgencyScope = (res, agencyId) => {
@@ -85,8 +74,10 @@ exports.createKey = async (req, res) => {
     if (!agency) {
       return res.status(404).json({ message: 'Agency not found' });
     }
-    if (!agencyHasApiAccess(agency)) {
-      return res.status(403).json({ message: 'API access requires Professional, Agency, Enterprise, or the API access add-on' });
+    // Tataz kontrola jako v apiKeyMiddleware — vydani a overeni se nesmi
+    // rozejit, jinak se klic vyda a hned dostava 403 od vsech endpointu.
+    if (!agencyHasApiAccess(agency, (e) => logger.error('[API Keys] Failed to parse extraFeatures JSON:', e))) {
+      return res.status(403).json({ message: API_ACCESS_DENIED_MESSAGE });
     }
 
     // 3. Generate Key Parts

@@ -164,6 +164,16 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
   .map(o => o.trim())
   .filter(Boolean);
 
+// Bez ALLOWED_ORIGINS projde z prohlizece jen firebase.app/web.app a Capacitor
+// localhost — web na vlastni domene dostane 403, ktere v UI vypada jako chyba
+// prihlaseni. Tohle se stalo 3. 11. 2026 na novem serveru, tak ted aspon krici.
+if (process.env.NODE_ENV === 'production' && !allowedOrigins.some(o => o.startsWith('https://'))) {
+  logger.warn(
+    'ALLOWED_ORIGINS neobsahuje zadny https origin — web na vlastni domene ' +
+    'dostane z API 403 (CORS). Nastav napr. ALLOWED_ORIGINS=https://example.eu'
+  );
+}
+
 // Capacitor Android/iOS WebView always uses these origins — must be unconditionally allowed.
 const CAPACITOR_ORIGINS = [
   'https://localhost',
@@ -346,7 +356,8 @@ if (process.env.NODE_ENV !== 'production') {
       servers: [{ url: '/api' }],
       components: {
         securitySchemes: {
-          bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }
+          bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+          apiKeyAuth: { type: 'apiKey', in: 'header', name: 'X-API-KEY', description: 'Format nx_live_<ID>.<SECRET>, vydava POST /developer/keys' }
         }
       },
       security: [{ bearerAuth: [] }],
@@ -359,7 +370,8 @@ if (process.env.NODE_ENV !== 'production') {
         { name: 'Safety', description: 'Safety sessions & SOS' },
         { name: 'Device', description: 'Device binding & relay' },
         { name: 'Analytics', description: 'Statistics & reports' },
-        { name: 'Admin', description: 'Global admin features' }
+        { name: 'Admin', description: 'Global admin features' },
+        { name: 'Public API', description: 'Externi API na klic (X-API-KEY), tarif Agency' }
       ],
       paths: {
         '/auth/login': { post: { tags: ['Auth'], summary: 'Login', security: [], requestBody: { content: { 'application/json': { schema: { type: 'object', required: ['email', 'password'], properties: { email: { type: 'string' }, password: { type: 'string' } } } } } }, responses: { 200: { description: 'JWT token + refresh token + user data' }, 401: { description: 'Invalid credentials' } } } },
@@ -369,7 +381,7 @@ if (process.env.NODE_ENV !== 'production') {
         '/auth/register-user': { post: { tags: ['Auth'], summary: 'Self-register with invite code', security: [], responses: { 201: { description: 'User created' } } } },
         '/auth/me': { get: { tags: ['Auth'], summary: 'Get current user profile', responses: { 200: { description: 'User profile' } } } },
         '/profiles': { get: { tags: ['Profiles'], summary: 'List profiles for agency', responses: { 200: { description: 'Array of profiles' } } }, post: { tags: ['Profiles'], summary: 'Create new profile', responses: { 201: { description: 'Profile created' } } } },
-        '/profiles/{id}': { patch: { tags: ['Profiles'], summary: 'Update profile', responses: { 200: { description: 'Profile updated' } } } },
+        '/profiles/{id}': { patch: { tags: ['Profiles'], summary: 'Update profile', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Id profilu z GET /profiles' }], responses: { 200: { description: 'Profile updated' } } } },
         '/chats': { get: { tags: ['Messaging'], summary: 'Get all chats for agency', responses: { 200: { description: 'Array of chats with latest messages' } } } },
         '/messages': { post: { tags: ['Messaging'], summary: 'Send message', responses: { 201: { description: 'Message sent' } } } },
         '/bookings': { get: { tags: ['Bookings'], summary: 'List bookings', responses: { 200: { description: 'Array of bookings' } } }, post: { tags: ['Bookings'], summary: 'Create booking', responses: { 201: { description: 'Booking created' } } } },
@@ -382,7 +394,40 @@ if (process.env.NODE_ENV !== 'production') {
         '/analytics/daily': { get: { tags: ['Analytics'], summary: 'Daily stats for last N days', responses: { 200: { description: 'Array of daily stats' } } } },
         '/device/bindings': { get: { tags: ['Device'], summary: 'List device bindings', responses: { 200: { description: 'Array of bindings' } } } },
         '/blacklist': { get: { tags: ['Safety'], summary: 'Search blacklist entries', responses: { 200: { description: 'Array of entries' } } } },
-        '/subscriptions': { get: { tags: ['Agency'], summary: 'Get agency subscriptions', responses: { 200: { description: 'Array of subscriptions' } } } },
+        '/subscriptions/plans': { get: { tags: ['Agency'], summary: 'Plan options + pricing', security: [], responses: { 200: { description: 'Array of plans' } } } },
+        '/subscriptions/current': { get: { tags: ['Agency'], summary: 'Current subscription', responses: { 200: { description: 'Subscription or null' } } } },
+        '/subscriptions/history': { get: { tags: ['Agency'], summary: 'Subscription history', responses: { 200: { description: 'Array of subscriptions' } } } },
+        '/developer/keys': {
+          get: { tags: ['Public API'], summary: 'List API keys', responses: { 200: { description: 'Array of keys (bez tajne casti)' } } },
+          post: {
+            tags: ['Public API'],
+            summary: 'Create API key',
+            description: 'Vyzaduje tarif Agency nebo modul api_access — tataz podminka, jakou ma overovani na /v1/public/*. Vynechane scopes se doplni na read:stats, s nimz endpointy /profiles a /messages vraci 403.',
+            requestBody: {
+              required: false,
+              content: { 'application/json': { schema: { type: 'object', properties: {
+                name: { type: 'string', maxLength: 120, default: 'Default Key', description: 'Popisek klice' },
+                scopes: { type: 'array', default: ['read:stats'], items: { type: 'string', enum: ['read:stats', 'read:profiles', 'read:messages', 'relay:bridge'] }, description: 'Prijima se i jeden retezec oddeleny carkami. relay:bridge neni HTTP endpoint, slouzi pro Socket.IO.' }
+              } } } }
+            },
+            responses: {
+              201: { description: 'apiKey (tajna cast, vraci se jen jednou), name, scopes' },
+              400: { description: 'Nepodporovany scope — odpoved nese invalidScopes a allowedScopes' },
+              403: { description: 'Uzivatel bez agentury, neni admin, nebo tarif bez API' }
+            }
+          }
+        },
+        '/developer/keys/{id}': {
+          delete: {
+            tags: ['Public API'],
+            summary: 'Revoke API key',
+            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Databazove id klice, jak ho vraci GET /developer/keys (ne keyId z hlavicky)' }],
+            responses: { 200: { description: 'Revoked' }, 403: { description: 'Neni admin agentury' }, 404: { description: 'Klic nenalezen' } }
+          }
+        },
+        '/v1/public/stats': { get: { tags: ['Public API'], summary: 'Metriky agentury', description: 'metrics.revenue je NEIMPLEMENTOVANE a vraci vzdy "0.00".', security: [{ apiKeyAuth: [] }], responses: { 200: { description: 'agencyId, timestamp, metrics' }, 401: { description: 'Chybi nebo neplatny X-API-KEY' }, 403: { description: 'Chybi scope read:stats, klic vyprsel, nebo tarif bez API' }, 429: { description: 'Prekrocen limit 60 pozadavku za minutu' } } } },
+        '/v1/public/profiles': { get: { tags: ['Public API'], summary: 'Aktivni profily (max 1000)', security: [{ apiKeyAuth: [] }], responses: { 200: { description: 'Array profilu' }, 403: { description: 'Chybi scope read:profiles' } } } },
+        '/v1/public/messages': { get: { tags: ['Public API'], summary: 'Posledni zpravy', parameters: [{ name: 'limit', in: 'query', schema: { type: 'integer', default: 50, maximum: 100 } }, { name: 'offset', in: 'query', schema: { type: 'integer', default: 0 } }], security: [{ apiKeyAuth: [] }], responses: { 200: { description: 'Array zprav' }, 403: { description: 'Chybi scope read:messages' } } } },
         '/admin/features': { get: { tags: ['Admin'], summary: 'List global features', responses: { 200: { description: 'Array of features' } } } }
       }
     },
@@ -393,6 +438,12 @@ if (process.env.NODE_ENV !== 'production') {
     customSiteTitle: 'Nexus Hub API Docs'
   }));
 }
+
+// Neznama /api cesta vracela vychozi HTML stranku Expressu. Klient, ktery cte
+// JSON, na tom spadne jinde a zdanlive bez souvislosti.
+app.use('/api', (req, res) => {
+  res.status(404).json({ message: `Endpoint ${req.method} /api${req.path} neexistuje` });
+});
 
 // Sentry error handler (must be before custom error handler)
 try {

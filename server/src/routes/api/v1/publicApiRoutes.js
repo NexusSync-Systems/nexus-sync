@@ -26,9 +26,14 @@ router.get('/stats', requireScope('read:stats'), async (req, res) => {
   try {
     const { id: agencyId } = req.agency;
 
+    // totalBookings MUSI pocitat prisma.booking, ne safetySession. Planovana
+    // relace vznika jen u vyjezdu (`ensurePlannedSafetySession` se u incall
+    // zamerne nespousti), takze agentura delajici prevazne incall tu videla
+    // skoro nulu. Tentyz omyl byl opraven v agencyController.getStats; verejne
+    // API si stare pocitani neslo dal pod stejnym popiskem.
     const [totalMessages, totalBookings, totalProfiles] = await Promise.all([
       prisma.message.count({ where: { chat: { agencyId } } }),
-      prisma.safetySession.count({ where: { agencyId } }),
+      prisma.booking.count({ where: { agencyId } }),
       prisma.profile.count({ where: { agencyId } })
     ]);
 
@@ -39,7 +44,9 @@ router.get('/stats', requireScope('read:stats'), async (req, res) => {
         totalMessages,
         totalBookings,
         totalProfiles,
-        revenue: "0.00" // Placeholder for now
+        // POZOR: neimplementovano, vraci se vzdy "0.00". Je to zdokumentovane
+        // jako nedostupne, aby na tom nikdo venku nestavel vypocty.
+        revenue: "0.00"
       }
     });
   } catch (error) {
