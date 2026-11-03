@@ -19,7 +19,23 @@ nexus_YYYYMMDDTHHMMSSZ.dump
 nexus_YYYYMMDDTHHMMSSZ.dump.sha256
 ```
 
-K ověření je v repozitáři hotový nástroj. **Nerestorujte do produkční databáze** — skript to sám odmítne, ale smysl je podívat se na obsah dřív, než ho někam pustíte:
+### Nejsnazší cesta: prozkoumat dump u sebe na stroji
+
+Server ještě nemáte a Postgres lokálně instalovat nemusíte. `scripts/prozkoumej-zalohu.sh` udělá všechno v zahoditelném kontejneru:
+
+```bash
+./scripts/prozkoumej-zalohu.sh /cesta/k/nexus_….dump
+```
+
+Ověří `sha256`, přečte z hlavičky dumpu **čas vytvoření a verzi Postgresu** (nezávisle na jméně souboru), obnoví data do kontejneru, vypíše **počty řádků** u tabulek, které jmenuje brána 3 v `docs/pilot-readiness-checklist.md`, a **čas poslední zprávy, aktivity chatu a auditu**. Pak kontejner smaže. Nikam se nepřipojuje a dump otevírá jen pro čtení.
+
+Potřebuje jen běžící Docker (nebo OrbStack). Když démon neběží, řekne to a skončí.
+
+Z `Dumped from database version` si všimněte verze: dump z novějšího Postgresu se do staršího obnovit nedá.
+
+### Varianta na serveru
+
+Až server bude, je v repozitáři `server/scripts/verify-restore-postgres.sh`. **Nerestorujte do produkční databáze** — skript to sám odmítne, ale smysl je podívat se na obsah dřív, než ho někam pustíte:
 
 ```bash
 sudo -u postgres createdb nexus_kontrola
