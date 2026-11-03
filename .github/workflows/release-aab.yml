@@ -11,10 +11,15 @@
 #
 # Spuštění: Actions → „Release AAB pro Google Play" → Run workflow.
 #
-# CO TENHLE WORKFLOW NEDĚLÁ: nic do Google Play nenahrává. Vyrobí soubor
-# a připne ho jako artefakt. Nahrání zůstává ruční krok — vyžaduje vývojářský
-# účet a odsouhlasení prohlášení (poloha na pozadí, formulář Data safety),
-# což je rozhodnutí člověka, ne CI.
+# NAHRÁVÁNÍ DO PLAY je od 3. 11. 2026 možné, ale JEN NA VYŽÁDÁNÍ — přepínačem
+# `nahrat_do_play` při spuštění, výchozí je vypnuto. Důvod zůstává tentýž, proč
+# tu dřív nebylo vůbec: odsouhlasit prohlášení (poloha na pozadí, formulář Data
+# safety) je rozhodnutí člověka, ne CI. Přepínač to rozhodnutí jen přenáší na
+# toho, kdo workflow spouští, místo aby ho dělal každý push.
+#
+# Nahrává se POUZE plná aplikace a POUZE na track `internal`. Relay do Play
+# nepatří (SMS a call-log oprávnění) a je z nahrávání vyloučená natvrdo, ne
+# přepínačem — viz krok „Nahrát do Google Play".
 name: Release AAB pro Google Play
 
 on:
@@ -29,11 +34,22 @@ on:
         type: boolean
         required: false
         default: false
+      nahrat_do_play:
+        description: 'Nahrát plnou aplikaci na track internal (vyžaduje secret PLAY_SERVICE_ACCOUNT_JSON)'
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   release-aab:
     name: Podepsaný AAB
     runs-on: ubuntu-latest
+
+    env:
+      # `secrets` NENÍ k dispozici v podmínce `if:` u kroku — jen v `env`.
+      # Testuje se proto tady a v podmínkách se pak sahá na `env.MA_PLAY`.
+      # Porovnává se jen na prázdnotu, takže se hodnota nikam nedostane.
+      MA_PLAY: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
     timeout-minutes: 40
 
     steps:
@@ -199,6 +215,40 @@ jobs:
             esac
           done
           exit $CHYBA
+
+      # Nahrává se jen plná aplikace. Relay tu není a nemá tu být: má READ_SMS,
+      # SEND_SMS, WRITE_SMS a READ_CALL_LOG, což Play pouští jen výchozímu SMS
+      # klientovi s doloženým povoleným účelem. „Přeposílá SMS na server" mezi
+      # povolené účely nepatří.
+      - name: Nahrát do Google Play (internal)
+        if: inputs.nahrat_do_play && env.MA_PLAY == 'true'
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.nexushub.app
+          releaseFiles: vystup/nexus-hub-${{ env.VERZE }}.aab
+          track: internal
+          status: completed
+          releaseName: ${{ env.VERZE }}
+
+      # Vypnutá nebo nenastavená věc se nesmí přeskočit potichu — job by skončil
+      # zeleně a vypadal by, že nahrál. Tatáž lekce jako u relay field testu (#141).
+      - name: Proč se nenahrálo
+        if: ${{ !(inputs.nahrat_do_play && env.MA_PLAY == 'true') }}
+        run: |
+          {
+            echo "### Do Google Play se NIC nenahrálo"
+            echo ""
+            if [ "${{ inputs.nahrat_do_play }}" != "true" ]; then
+              echo "- přepínač \`nahrat_do_play\` byl vypnutý (výchozí stav)"
+            fi
+            if [ "${{ env.MA_PLAY }}" != "true" ]; then
+              echo "- secret \`PLAY_SERVICE_ACCOUNT_JSON\` není nastavený"
+            fi
+            echo ""
+            echo "Postup nastavení: \`docs/google-play-vydavani.md\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Do Google Play se nic nenahrálo — viz souhrn běhu."
 
       - name: Připnout AAB jako artefakt
         uses: actions/upload-artifact@v4
