@@ -29,36 +29,60 @@ jobs:
     steps:
       - name: Run backup and migrations on VPS
         uses: appleboy/ssh-action@v1
+        env:
+          # Vstupy jdou pres env, ne pres ${{ }} primo do skriptu. Interpolace
+          # by vlozila uzivatelsky retezec doprostred shellu; spustit workflow
+          # sice muze jen nekdo s pravem zapisu, ale neni duvod to nechavat.
+          MAINT_CONFIRM: ${{ inputs.confirm }}
+          MAINT_MODE: ${{ inputs.mode }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
-          password: ${{ secrets.DEPLOY_PASSWORD }}
+          # Klicem, ne heslem. Obraz Ubuntu u Oracle ma PasswordAuthentication no,
+          # takze `password:` by se nepripojilo za zadnych okolnosti — a secret
+          # DEPLOY_PASSWORD uz neexistuje. Tataz oprava jako v ci.yml (#145).
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: MAINT_CONFIRM,MAINT_MODE
           command_timeout: 15m
           script: |
             set -e
-            if [ "${{ inputs.confirm }}" != "MIGRATE_PRODUCTION" ]; then
+            if [ "$MAINT_CONFIRM" != "MIGRATE_PRODUCTION" ]; then
               echo "Confirmation mismatch. Type MIGRATE_PRODUCTION to run production DB maintenance."
               exit 1
             fi
 
+            # Prihlasujeme se jako ubuntu, ale /root/nexus-backend vlastni root
+            # a pm2 proces taky. MAINT_MODE se predava jako jeden argument,
+            # takze se jeho obsah nedostane do kodu skriptu.
+            sudo MAINT_MODE="$MAINT_MODE" bash -s <<'NEXUS_MAINT'
+            set -e
             cd /root/nexus-backend
+
+            # POZOR: tohle dnes selze. Server nema cim se prihlasit ke GitHubu
+            # (origin je https bez pristupovych udaju), takze fetch skonci na
+            # "could not read Username". Resi se to bud deploy key, nebo tim,
+            # ze kod bude dorucovat CI pres SSH — viz docs/novy-server-runbook.md.
             git fetch origin master
             git checkout master
             git pull --ff-only origin master
 
             npm install
 
-            if [ "${{ inputs.mode }}" != "migrate-only" ]; then
+            if [ "$MAINT_MODE" != "migrate-only" ]; then
               npm run db:backup
             fi
 
-            if [ "${{ inputs.mode }}" != "backup-only" ]; then
-              if [ "${{ inputs.mode }}" = "baseline-and-migrate" ]; then
+            if [ "$MAINT_MODE" != "backup-only" ]; then
+              if [ "$MAINT_MODE" = "baseline-and-migrate" ]; then
                 ./node_modules/.bin/prisma migrate resolve --applied 0_init
               fi
               ./node_modules/.bin/prisma migrate deploy
               ./node_modules/.bin/prisma generate
-              pm2 restart nexus-backend-final --update-env || pm2 start server.js --name nexus-backend-final
+              # Drive `pm2 start server.js` — takovy soubor neexistuje, vstupni
+              # bod je src/index.js. Pri prvnim spusteni na cistem stroji by to
+              # spadlo. Tataz oprava jako v ci.yml (#145).
+              pm2 restart nexus-backend-final --update-env || pm2 start src/index.js --name nexus-backend-final
               sleep 3
               pm2 status nexus-backend-final | grep -q online && echo "DB maintenance deploy OK" || exit 1
             fi
+            NEXUS_MAINT
