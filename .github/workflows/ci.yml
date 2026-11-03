@@ -617,8 +617,23 @@ jobs:
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
-          password: ${{ secrets.DEPLOY_PASSWORD }}
+          # Přihlášení KLÍČEM, ne heslem. Obraz Ubuntu u Oracle Cloudu má
+          # `PasswordAuthentication no` a rootovi do authorized_keys vkládá
+          # vynucený příkaz, který přihlášení odmítne — heslem se tam tedy
+          # připojit nelze a nastavovat ho na stroji s portem 22 otevřeným do
+          # internetu by byl krok zpátky.
+          #
+          # DEPLOY_USER proto musí být běžný uživatel se sudo (na Oracle
+          # Ubuntu `ubuntu`), DEPLOY_SSH_KEY jeho privátní klíč.
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
+            # Celé tělo běží pod rootem: aplikace leží v /root/nexus-backend
+            # a pm2 proces vlastní root. Uvozený heredoc znamená, že proměnné
+            # rozbaluje až ten vnitřní shell, ne přihlašovací.
+            #
+            # `exit 1` uvnitř ukončí vnitřní shell, sudo vrátí jeho návratový
+            # kód a krok spadne — pojistky níž tedy fungují dál.
+            sudo -s <<'NEXUS_DEPLOY'
             cd /root/nexus-backend
             git pull origin master
             if [ -n "${{ secrets.STRIPE_SECRET_KEY }}" ] && [ -z "${{ secrets.STRIPE_WEBHOOK_SECRET }}" ]; then
@@ -738,6 +753,7 @@ jobs:
             chmod o+x /root/nexus-backend/server || true
             chmod o+x /root/nexus-backend/server/public || true
             chmod -R o+rx /root/nexus-backend/server/public/downloads || true
+            NEXUS_DEPLOY
 
   deploy-frontend:
     name: Deploy Frontend (Firebase)
