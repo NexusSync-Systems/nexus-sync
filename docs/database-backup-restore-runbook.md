@@ -45,7 +45,79 @@ Recommended retention:
 - Weekly backups: 8 to 12 weeks.
 - Monthly backups: 6 to 12 months.
 
-Copy at least one daily backup off the app server.
+Copy at least one daily backup off the app server. On the current server this is
+done by `scripts/odvez-zalohu.sh`, described below.
+
+## What is actually configured on api.nexusstack.eu (3 Nov 2026)
+
+The sections above describe the intended practice. This section records what is
+installed and verified, so nobody has to guess.
+
+| Where | What |
+| --- | --- |
+| `/root/nexus-zalohy/nocni-zaloha.sh` | Nightly backup. Runs `scripts/backup-postgres.sh`, then the encryption step. |
+| `/root/nexus-zalohy/sifrovana-kopie.sh` | Encrypts the newest dump with GPG AES256 and test-decrypts it. |
+| `/root/nexus-zalohy/kontrola-veku.sh` | Daily staleness check: fails if the newest dump is older than 36 h. |
+| `/var/backups/nexus/` | Dumps, checksums and `*.dump.gpg`. Retention 14 days. Mode 700, root only. |
+| `/var/log/nexus-zaloha.log` | Log of every run. |
+| `/root/zaloha-heslo.txt` | GPG passphrase, mode 600. **A copy must exist outside the server or the encrypted archives are unopenable.** |
+
+Root crontab:
+
+```cron
+17 3 * * * /root/nexus-zalohy/nocni-zaloha.sh
+5 9 * * * /root/nexus-zalohy/kontrola-veku.sh
+```
+
+The staleness check runs during the day on purpose: a problem found at 09:05 gets
+noticed, one logged at 03:17 does not.
+
+### Why a wrapper instead of calling the script from cron directly
+
+Cron mails the job's output to root on a non-zero exit, and this machine has no
+mail configured. A failing backup would therefore be invisible — which is exactly
+what cost the production data on 3 Nov 2026. The wrapper writes to the log and, on
+failure, leaves a conspicuous `SELHALO-*.txt` in the backup directory, visible from
+a plain `ls`. A successful run removes those markers. The staleness check behaves
+the same way with `ZALOHA-ZASTARALA.txt` and `ZADNA-ZALOHA.txt`.
+
+Both failure paths were tested by forcing them, not assumed: a broken
+`DATABASE_URL` produced exit code 1 plus the marker, and back-dating the dumps by
+three days produced the staleness marker.
+
+### Taking a copy off the server
+
+```bash
+bash scripts/odvez-zalohu.sh
+```
+
+Pulls the newest `*.dump.gpg` to `~/Zalohy/nexus-hub`, keeps the last 7, and — if a
+passphrase file is available — **decrypts it and compares the checksum against the
+original on the server**. Without that step a transferred file is only a hope; the
+three zips that could not be used on 3 Nov 2026 looked fine from the outside too.
+
+The passphrase is read from `ZALOHA_HESLO_FILE` (default `~/.nexus-zaloha-heslo`).
+With no passphrase file the script still transfers the archive but says clearly
+that it did **not** verify it. A wrong passphrase and a corrupted archive are
+reported differently, because during a restore that distinction tells you where to
+look.
+
+Verified on 3 Nov 2026: the copy on the laptop decrypts and matches the dump on the
+server, checked without involving the server.
+
+### Still missing
+
+- **Nobody is notified.** Markers and the log only help someone who looks. There is
+  no mail or Telegram channel configured on this server, so a failed backup is
+  found by checking, not by being told.
+- **The off-server copy is manual.** `scripts/odvez-zalohu.sh` has to be run. An
+  automated pull would put personal data on a laptop on a schedule, which is a data
+  protection decision, not just a technical one — see
+  `docs/zpracovani-osobnich-udaju.md`.
+- **The CI job `Backup / Restore Readiness Audit` proves nothing about this server.**
+  It runs `server/scripts/audit-backup-restore.js` on the GitHub runner, and without
+  `STRICT_BACKUP_AUDIT=true` a missing backup is not even an error. It passed green
+  on 3 Nov 2026 while the production server had zero backups.
 
 ## Pre-deploy backup
 
