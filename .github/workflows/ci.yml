@@ -724,7 +724,12 @@ jobs:
             fi
 
             ./node_modules/.bin/prisma migrate deploy
-            pm2 restart nexus-backend-final --update-env || pm2 start server.js --name nexus-backend-final
+            # Vstupní bod je src/index.js (viz "main" a "start" v package.json).
+            # Dřív tu stálo server.js, který v backendovém repozitáři vůbec
+            # není — záložní větev tedy nikdy nemohla projít. Nevadilo to,
+            # dokud proces na serveru existoval a stačil restart; na čistém
+            # serveru by se ale backend nerozjel a deploy by spadl právě tady.
+            pm2 restart nexus-backend-final --update-env || pm2 start src/index.js --name nexus-backend-final
             sleep 3
             pm2 status nexus-backend-final | grep -q online && echo "Deploy OK" || exit 1
             # Zajištění oprávnění pro Nginx (www-data) číst z /root složky (403 Forbidden Fix)
