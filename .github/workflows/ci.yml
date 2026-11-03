@@ -662,9 +662,60 @@ jobs:
     needs: [sync-backend]
     if: github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     steps:
+      - uses: actions/checkout@v4
+
+      # Kód na server DORUČUJE CI. Server si ho dřív stahoval sám přes
+      # `git pull origin master`, jenže `/root/nexus-backend` má origin na
+      # privátní https adresu bez přihlašovacích údajů — fetch končil na
+      # „could not read Username" a nasazení spadlo na prvním kroku.
+      #
+      # Druhá cesta by byla dát serveru deploy key. Tahle je lepší: na stroji
+      # dostupném z internetu pak neleží ŽÁDNÝ přístup ke GitHubu, není co
+      # rotovat ani co unikne, kdyby se na server někdo dostal.
+      #
+      # `--delete` je tu schválně: bez něj by smazané soubory na serveru
+      # zůstaly ležet navždy a nasazená verze by se tiše rozcházela s repem.
+      # Co se smazat NESMÍ, je ve výjimkách — `.env` se na server nikdy
+      # nekopíruje, `node_modules` (348 MB) ani `public/downloads` (109 MB)
+      # se nepřenášejí.
+      #
+      # `.git` je vyloučený a smaže se jednou v těle skriptu: nechat ho tam
+      # zastaralý by znamenalo, že `git log` na serveru lže o tom, co běží.
+      - name: Doručit kód na server
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          KLIC="$RUNNER_TEMP/deploy_key"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$KLIC"
+          chmod 600 "$KLIC"
+
+          rsync -az --delete \
+            --rsync-path="sudo rsync" \
+            -e "ssh -i $KLIC -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20" \
+            --exclude '.git/' \
+            --exclude '.env' --exclude '.env.*' \
+            --exclude 'node_modules/' \
+            --exclude 'public/downloads/' \
+            --exclude 'downloads/' \
+            --exclude 'logs/' \
+            --exclude 'uploads/' \
+            --exclude '.DS_Store' --exclude '._*' \
+            server/ "$DEPLOY_USER@$DEPLOY_HOST:/root/nexus-backend/"
+
+          rm -f "$KLIC"
+          echo "Kod dorucen na $DEPLOY_HOST:/root/nexus-backend"
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
+        env:
+          # Do NASAZENO.txt na serveru. Musi projit az dovnitr sudo — viz nize.
+          NASAZENY_COMMIT: ${{ github.sha }}
+          NASAZENY_BEH: ${{ github.run_number }}
         with:
+          envs: NASAZENY_COMMIT,NASAZENY_BEH
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           # Přihlášení KLÍČEM, ne heslem. Obraz Ubuntu u Oracle Cloudu má
@@ -683,9 +734,27 @@ jobs:
             #
             # `exit 1` uvnitř ukončí vnitřní shell, sudo vrátí jeho návratový
             # kód a krok spadne — pojistky níž tedy fungují dál.
-            sudo -s <<'NEXUS_DEPLOY'
+            # Promenne se predavaji jako argumenty sudo. Heredoc je uvozeny,
+            # takze je vnitrni shell dostane jen takhle — jinak by v NASAZENO.txt
+            # byly prazdne radky a nikdo by si toho nevsiml.
+            sudo NASAZENY_COMMIT="$NASAZENY_COMMIT" NASAZENY_BEH="$NASAZENY_BEH" bash -s <<'NEXUS_DEPLOY'
             cd /root/nexus-backend
-            git pull origin master
+
+            # Kod sem dorucil predchozi krok rsyncem. Zadne stahovani z GitHubu
+            # se tu nedeje a server k nemu nema mit pristup.
+            #
+            # Zastaraly .git by tvrdil, ze bezi neco jineho, nez co rsync
+            # prinesl. Pryc s nim; zaznamem o nasazeni je NASAZENO.txt
+            # a historie zustava na GitHubu.
+            if [ -d .git ]; then
+              rm -rf .git
+              echo "Odstranen zastaraly .git — kod dorucuje CI, ne git pull."
+            fi
+
+            # Zbytky po rucnim nasazeni z macOS (3. 11. 2026): doprovodne soubory
+            # `._*`. Rsync je ma mezi vyjimkami, aby se nikdy neprenasely, jenze
+            # vyjimka zaroven brani jejich smazani — zustaly by tu navzdy.
+            find . -name '._*' -type f -delete 2>/dev/null || true
             if [ -n "${{ secrets.STRIPE_SECRET_KEY }}" ] && [ -z "${{ secrets.STRIPE_WEBHOOK_SECRET }}" ]; then
               echo "STRIPE_SECRET_KEY is configured, but STRIPE_WEBHOOK_SECRET is missing. Refusing to deploy billing without webhook verification."
               exit 1
@@ -794,6 +863,14 @@ jobs:
             # není — záložní větev tedy nikdy nemohla projít. Nevadilo to,
             # dokud proces na serveru existoval a stačil restart; na čistém
             # serveru by se ale backend nerozjel a deploy by spadl právě tady.
+            # Zaznam o tom, co tu bezi. Nahrazuje `git log`, ktery po odstraneni
+            # .git neni — bez nej by na serveru nebylo jak zjistit nasazenou verzi.
+            {
+              echo "commit:   ${NASAZENY_COMMIT}"
+              echo "beh:      ${NASAZENY_BEH}"
+              echo "nasazeno: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            } > /root/nexus-backend/NASAZENO.txt
+
             pm2 restart nexus-backend-final --update-env || pm2 start src/index.js --name nexus-backend-final
             sleep 3
             pm2 status nexus-backend-final | grep -q online && echo "Deploy OK" || exit 1

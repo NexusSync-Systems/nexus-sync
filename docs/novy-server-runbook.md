@@ -397,3 +397,33 @@ Co je potřeba udělat, než ta hodnota začne platit (**není to krok za krokem
 Projděte `docs/pilot-readiness-checklist.md`. Po postavení serveru by měly jít vyhodnotit brány, které dosud nešly vůbec — 3 (záloha), 4 (Stripe webhook), 5 (relay), 6 (RBAC proti endpointům), 7 (monitoring) a 8 (manuální smoke).
 
 Z brány 7 nezapomeňte na alerty: v kódu je podpora Telegramu i Sentry, ale jestli byly nastavené, bylo vidět jen v `.env` na starém serveru. Na novém to nastavte vědomě, nebo vědomě vynechte — brána 10 má no-go „monitoring není dostupný a nikdo nesleduje logy".
+
+## Jak se na server dostává kód (od 3. 11. 2026)
+
+**Doručuje ho CI, server si ho nestahuje.** Job `deploy-backend` v `ci.yml`
+pošle obsah `server/` rsyncem přes SSH (`--rsync-path="sudo rsync"`, protože
+`/root/nexus-backend` vlastní root) a teprve pak pouští instalaci, migrace
+a restart.
+
+Dřív tam byl `git pull origin master`. Nefungoval: `/root/nexus-backend` má
+origin na privátní https adresu bez přihlašovacích údajů a fetch končil na
+`could not read Username`. Druhá možnost byla dát serveru deploy key — tahle
+je lepší, protože **na stroji dostupném z internetu neleží žádný přístup
+ke GitHubu**.
+
+Co se nepřenáší a nesmí zmizet: `.env`, `node_modules` (348 MB),
+`public/downloads` (109 MB), `logs`, `uploads`. Je to ve výjimkách rsyncu.
+
+`--delete` je tam schválně. Bez něj by soubory smazané v repozitáři zůstaly
+na serveru ležet navždy a nasazená verze by se tiše rozcházela s tím, co je
+v gitu.
+
+**Na serveru už není `.git`.** Skript ho při prvním nasazení odstraní —
+zastaralý by tvrdil, že běží něco jiného, než co rsync přinesl. Záznamem
+o nasazené verzi je `/root/nexus-backend/NASAZENO.txt` s commitem, číslem
+běhu a časem; historie zůstává na GitHubu.
+
+```bash
+ssh -i ~/.ssh/nexus_hub_ed25519 ubuntu@api.nexusstack.eu \
+  'sudo cat /root/nexus-backend/NASAZENO.txt'
+```
