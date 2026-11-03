@@ -54,24 +54,16 @@ const webAppUrl = () => {
   const prime = (process.env.APP_URL || '').trim().replace(/\/+$/, '');
   if (prime) return prime;
 
-  const zOrigins = (process.env.ALLOWED_ORIGINS || '')
-    .split(',')
-    .map(o => o.trim())
-    .find(o => o.startsWith('https://'));
-
-  if (zOrigins) {
-    varujJednou(
-      'APP_URL',
-      `APP_URL není nastavená, beru adresu webu z ALLOWED_ORIGINS (${zOrigins}). ` +
-      'Pokud web běží jinde, nastav APP_URL.'
-    );
-    return zOrigins.replace(/\/+$/, '');
-  }
-
+  // Dřív se tu bralo první `https://` z ALLOWED_ORIGINS. Vypadalo to chytře
+  // a na tomhle serveru je to ŠPATNĚ: ALLOWED_ORIGINS je seznam originů, které
+  // smí do API, ne adresa, kde web bydlí. První položka je `nexusstack.eu`,
+  // což je prezentační stránka — odkaz na reset hesla i návrat ze Stripe by
+  // mířil tam, kde ta stránka není. Hádat se to nedá, tak se to nehádá.
   varujJednou(
-    'APP_URL_chybi',
-    'APP_URL ani ALLOWED_ORIGINS nejsou nastavené — odkazy v e-mailech ' +
-    '(reset hesla, pozvánky) nebudou fungovat.'
+    'APP_URL',
+    'APP_URL není nastavená — odkazy v e-mailech (reset hesla, pozvánky) ' +
+    'a záložní návratová adresa ze Stripe se nemají z čeho sestavit. ' +
+    'Nastav ji na adresu WEBU, např. https://hub.example.eu (ne adresu API).'
   );
   return '';
 };
