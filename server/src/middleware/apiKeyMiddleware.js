@@ -1,6 +1,7 @@
 const prisma = require('../services/db');
 const bcrypt = require('bcryptjs');
 const logger = require('../services/logger');
+const { API_ACCESS_DENIED_MESSAGE, agencyHasApiAccess } = require('../utils/apiEntitlement');
 
 /**
  * Middleware to authenticate requests using an X-API-KEY header.
@@ -44,33 +45,17 @@ const apiKeyAuth = async (req, res, next) => {
     }
 
     // 4. Check Agency Plan OR Feature Add-on
-    // Tarify s pristupem k Developer API. Musi se shodovat s `hasApiAccess`
-    // v client/src/components/Views/ApiSettingsView.jsx a s vyctem funkci
-    // v GET /api/subscriptions/plans, kde "Developer API pristup" patri
-    // vyhradne tarifu Agency. Driv tu byl i Professional — server tedy pustil
-    // klic, ktery si UI vubec nedovolilo vygenerovat a produkt neprodava.
-    const allowedPlans = ['Agency', 'Enterprise'];
+    // Tataz kontrola jako v apiKeyController pri vydani klice — oba volaji
+    // jednu funkci, aby se vydani a overeni nemohly rozejit.
     const currentPlan = apiKeyRecord.agency.plan || apiKeyRecord.agency.tier;
-    
-    let hasAccess = allowedPlans.includes(currentPlan);
-
-    // If plan doesn't match, check for specific add-on feature
-    if (!hasAccess && apiKeyRecord.agency.extraFeatures) {
-      try {
-        const features = JSON.parse(apiKeyRecord.agency.extraFeatures);
-        if (features.api_access === true || features.api_access === 'true') {
-          hasAccess = true;
-        }
-      } catch (e) {
-        logger.error('[API Auth] Failed to parse extraFeatures JSON:', e);
-      }
-    }
+    const hasAccess = agencyHasApiAccess(
+      apiKeyRecord.agency,
+      (e) => logger.error('[API Auth] Failed to parse extraFeatures JSON:', e)
+    );
 
     if (!hasAccess) {
       logger.warn(`[API Auth] Agency ${apiKeyRecord.agencyId} denied access (Plan: ${currentPlan}, No Add-on)`);
-      return res.status(403).json({ 
-        message: 'API access requires an Agency plan or a purchased API add-on.' 
-      });
+      return res.status(403).json({ message: API_ACCESS_DENIED_MESSAGE });
     }
 
     // 5. Update lastUsedAt (async, don't block request)
