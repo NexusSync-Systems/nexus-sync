@@ -142,6 +142,28 @@ public class NexusRelayPlugin extends Plugin {
         maybeRegisterCallStateListener();
     }
 
+    /**
+     * Android 15 umí popředovou službu ukončit, až vyčerpá rozpočet, a další
+     * start odmítne, dokud se aplikace neobjeví na popředí — jedině tím se
+     * časovač resetuje. Tohle je ta chvíle, kdy se o tom dá něco udělat.
+     *
+     * load() na to nestačí: ten běží jednou při vzniku pluginu. Když aktivita
+     * mezitím žila dál, vrácení na popředí žádnou metodu pluginu nevyvolá a
+     * relay by zůstal stát, i když má v nastavení zapnuto. Oznámení
+     * o zastavení relay posílá uživatele právě sem, takže tohle je to, co
+     * tomu slibu dává platnost.
+     */
+    @Override
+    protected void handleOnResume() {
+        super.handleOnResume();
+        if (!isRelayActiveInPrefs()) return;
+        try {
+            NexusRelayForegroundService.start(getContext());
+        } catch (Exception e) {
+            android.util.Log.w("NexusRelay", "handleOnResume: relay se nepodařilo nastartovat", e);
+        }
+    }
+
     @Override
     protected void handleOnDestroy() {
         unregisterCallStateListener();

@@ -11,8 +11,19 @@ def majorVersion = (versionProps.getProperty('VERSION_MAJOR') ?: '0').toInteger(
 def minorVersion = (versionProps.getProperty('VERSION_MINOR') ?: '1').toInteger()
 def forceNextMajorFromFile = (versionProps.getProperty('FORCE_NEXT_MAJOR') ?: 'false').toBoolean()
 
-def requestedTasks = gradle.startParameter.taskNames.collect { it.toLowerCase() }
-def isReleaseBuild = requestedTasks.any { it.contains('assemblerelease') || it.contains('bundlerelease') }
+// Názvy úloh nesou příchuť: ne „bundleRelease", ale „bundleNexusFullRelease".
+// Dokud se hledal holý podřetězec „bundlerelease", neodpovídalo mu nic a celý
+// blok níž byl mrtvý — s ním i majorRelease, FORCE_NEXT_MAJOR a
+// skipVersionIncrement. Proto vyjel první AAB jako 3.154, kdežto APK ze
+// stejného commitu jako 3.155 (ci.yml si minor zvyšuje sám, sedem).
+//
+// Kotva na konci je důležitá: „assembleNexusFullDebug" ani
+// „testNexusFullReleaseUnitTest" se verze dotknout nesmí.
+def requestedTasks = gradle.startParameter.taskNames
+    .collect { it.toLowerCase() }
+    .collect { it.substring(it.lastIndexOf(':') + 1) }   // :app:bundle… → bundle…
+def releaseTaskPattern = ~/^(?:assemble|bundle)[a-z0-9]*release$/
+def isReleaseBuild = requestedTasks.any { releaseTaskPattern.matcher(it).matches() }
 def isMajorRelease = (project.findProperty('majorRelease')?.toString()?.toBoolean() ?: false) || forceNextMajorFromFile
 def skipVersionIncrement = (project.findProperty('skipVersionIncrement')?.toString()?.toBoolean() ?: false)
 

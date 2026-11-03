@@ -94,6 +94,11 @@
             </intent-filter>
         </service>
 
+        <!-- dataSync tu není nedopatřením: Android 15+ mu sice dává rozpočet
+             6 hodin na 24, ale plná aplikace je v rukách operátorky a ta ho
+             otevřením resetuje. Relay telefon, který leží bez obsluhy, to
+             štěstí nemá — přepisuje si typ na specialUse v
+             src/nexusRelay/AndroidManifest.xml, kde je to rozepsané. -->
         <service
             android:name=".NexusRelayForegroundService"
             android:enabled="true"

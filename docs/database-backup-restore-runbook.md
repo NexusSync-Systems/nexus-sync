@@ -15,7 +15,7 @@ Nexus Hub production database is PostgreSQL via `DATABASE_URL`. Backups contain 
 From the backend server:
 
 ```bash
-cd /root/nexus-backend/server
+cd /root/nexus-backend
 DATABASE_URL="$DATABASE_URL" BACKUP_DIR=/var/backups/nexus npm run db:backup
 ```
 
@@ -36,7 +36,7 @@ RETENTION_DAYS=30 npm run db:backup
 Example cron entry:
 
 ```cron
-15 2 * * * cd /root/nexus-backend/server && DATABASE_URL='postgresql://...' BACKUP_DIR=/var/backups/nexus RETENTION_DAYS=30 npm run db:backup >> /var/log/nexus-db-backup.log 2>&1
+15 2 * * * cd /root/nexus-backend && DATABASE_URL='postgresql://...' BACKUP_DIR=/var/backups/nexus RETENTION_DAYS=30 npm run db:backup >> /var/log/nexus-db-backup.log 2>&1
 ```
 
 Recommended retention:
@@ -49,10 +49,31 @@ Copy at least one daily backup off the app server.
 
 ## Pre-deploy backup
 
-Before a deploy that includes Prisma migrations:
+**CI does this on its own since the `deploy-backend` backup gate landed.** On a
+push to `master` the job runs `prisma migrate status`; if migrations are
+pending it takes a verified backup into `/var/backups/nexus-pred-migraci`
+(90-day retention) and refuses to run `prisma migrate deploy` unless that
+backup succeeded. If the migration state cannot be determined — diverged
+history, a database Prisma does not manage, an unreachable database — the
+deploy stops instead of migrating blind.
+
+**The gate does not detect schema drift.** `prisma migrate status` reads the
+`_prisma_migrations` table and compares it with `prisma/migrations`; it never
+inspects the live table structure. A hand-run `ALTER TABLE` on production
+leaves migration history intact, so the gate still reports "up to date" and
+takes no backup. Use the `Schema Drift Check` job and `prisma migrate diff`
+for that. The gate guarantees one thing only: a **migration** will not run
+without a verified backup.
+
+`migrate deploy` is **not** harmless: it applies migrations as written, and
+`20261027000001_blacklist_reasons` drops columns. The gate exists because that
+is irreversible and nothing in the chain used to back up first.
+
+The steps below are for a **manual** deploy, or for a deploy run from anywhere
+other than the pipeline:
 
 ```bash
-cd /root/nexus-backend/server
+cd /root/nexus-backend
 npm run db:backup:audit
 npm run db:backup
 npx prisma migrate deploy
@@ -65,7 +86,7 @@ For a strict pre-pilot readiness check that also requires restore verification
 inputs:
 
 ```bash
-cd /root/nexus-backend/server
+cd /root/nexus-backend
 STRICT_BACKUP_AUDIT=true \
 RESTORE_DATABASE_URL='postgresql://nexus:password@localhost:5432/nexus_restore_verify' \
 BACKUP_FILE='/var/backups/nexus/nexus_YYYYMMDDTHHMMSSZ.dump' \
@@ -85,7 +106,7 @@ The verification script refuses to run if `RESTORE_DATABASE_URL` equals `DATABAS
 createdb nexus_restore_verify
 export RESTORE_DATABASE_URL='postgresql://nexus:password@localhost:5432/nexus_restore_verify'
 export BACKUP_FILE='/var/backups/nexus/nexus_YYYYMMDDTHHMMSSZ.dump'
-cd /root/nexus-backend/server
+cd /root/nexus-backend
 npm run db:restore:verify
 ```
 

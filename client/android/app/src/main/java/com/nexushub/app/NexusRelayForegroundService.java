@@ -3,10 +3,13 @@ package com.nexushub.app;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.Service;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
@@ -36,7 +39,9 @@ public class NexusRelayForegroundService extends Service {
 
     private static final String TAG            = "NexusRelayService";
     private static final String CHANNEL_ID     = "nexus-relay-foreground";
+    private static final String TIMEOUT_CHANNEL_ID = "nexus-relay-stopped";
     private static final int    NOTIFICATION_ID = 10021;
+    private static final int    TIMEOUT_NOTIFICATION_ID = 10022;
     private static final int    POLL_INTERVAL_S = 30;   // native outbox poll interval
     private static final int    INITIAL_DELAY_S = 5;    // first poll after 5s
 
@@ -93,13 +98,137 @@ public class NexusRelayForegroundService extends Service {
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+            startForeground(NOTIFICATION_ID, buildNotification(), typPopredoveSluzby());
         } else {
             startForeground(NOTIFICATION_ID, buildNotification());
         }
+        // Relay zase běží — varování o zastavení už neplatí.
+        rozpocetVyprsel = false;
+        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm != null) nm.cancel(TIMEOUT_NOTIFICATION_ID);
+
         registerCallStateListener();
         startNativePolling();
         return START_STICKY;
+    }
+
+    /**
+     * Typ popředové služby, se kterým se relay spouští.
+     *
+     * Android 15 a výš dává typu dataSync rozpočet 6 hodin na 24 hodin.
+     * Relay telefon leží v šuplíku a nikdo ho nebere do ruky — rozpočet by
+     * mu došel a Android by službu ukončil (a další start odmítl), protože
+     * časovač resetuje jedině to, když někdo aplikaci otevře na popředí.
+     * Typ specialUse tomuhle limitu nepodléhá, proto ho relay upřednostňuje.
+     *
+     * Typ se nebere z pevné konstanty, ale z toho, co má příchuť doopravdy
+     * v manifestu: specialUse deklaruje jen src/nexusRelay, plná aplikace ne
+     * (musela by si o něj v Google Play zvlášť požádat). Kdyby se tu natvrdo
+     * vracelo SPECIAL_USE, plná aplikace by na startForeground spadla.
+     */
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private int typPopredoveSluzby() {
+        int deklarovane = 0;
+        try {
+            ServiceInfo info = getPackageManager().getServiceInfo(
+                new ComponentName(this, NexusRelayForegroundService.class), 0);
+            deklarovane = info.getForegroundServiceType();
+        } catch (PackageManager.NameNotFoundException e) {
+            Log.w(TAG, "Vlastní ServiceInfo se nepodařilo přečíst, beru dataSync", e);
+        }
+
+        return vyberTyp(deklarovane, Build.VERSION.SDK_INT);
+    }
+
+    /**
+     * Oddělené od {@link #typPopredoveSluzby()}, aby se dalo otestovat bez
+     * telefonu — viz NexusRelayForegroundServiceTest. Chyba v téhle úvaze se
+     * totiž neprojeví varováním, ale pádem plné aplikace na startForeground.
+     *
+     * @param deklarovane maska typů z manifestu (0 = nepodařilo se přečíst)
+     * @param sdkInt      verze Androidu na telefonu
+     */
+    static int vyberTyp(int deklarovane, int sdkInt) {
+        boolean maSpecialUse = sdkInt >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+            && (deklarovane & ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) != 0;
+        return maSpecialUse
+            ? ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            : ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC;
+    }
+
+    // ── Vypršení rozpočtu popředové služby ───────────────────────────────────
+
+    /**
+     * Android 15+ u časově omezených typů (dataSync, mediaProcessing) zavolá
+     * tohle, až dojde rozpočet. Služba má pak pár sekund na to, aby skončila
+     * sama — jinak ji systém shodí s RemoteServiceException.
+     *
+     * Relay běží na specialUse, který limitu nepodléhá, takže sem za
+     * normálních okolností nedojde. Platí to ale pro plnou aplikaci (ta
+     * zůstává na dataSync) a hlavně to je pojistka pro případ, že Google
+     * limit rozšíří i na specialUse. Tiše umřít je to jediné, co si relay
+     * dovolit nesmí.
+     */
+    @Override
+    @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
+    public void onTimeout(int startId, int fgsType) {
+        zastavPoVyprseniRozpoctu("vypršel rozpočet typu " + fgsType);
+    }
+
+    /** Starší jednoparametrová varianta (Android 14, shortService). */
+    @Override
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    public void onTimeout(int startId) {
+        zastavPoVyprseniRozpoctu("vypršel rozpočet popředové služby");
+    }
+
+    private boolean rozpocetVyprsel = false;
+
+    private void zastavPoVyprseniRozpoctu(String duvod) {
+        if (rozpocetVyprsel) return;   // obě varianty onTimeout můžou přijít obě
+        rozpocetVyprsel = true;
+
+        Log.w(TAG, "Android ukončuje popředovou službu: " + duvod);
+        stopNativePolling();
+        unregisterCallStateListener();
+        stopForeground(true);
+        oznamZastaveni();
+        stopSelf();
+    }
+
+    /**
+     * Trvalé oznámení zmizí i se službou, takže po relay nezůstane žádná
+     * stopa. Tohle je ta stopa — vlastní kanál s vyšší důležitostí, ne tichý
+     * servisní, ať si toho někdo všimne dřív než zákazník.
+     */
+    private void oznamZastaveni() {
+        try {
+            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) return;
+            // Oznámení říká „otevřete aplikaci" — musí se tedy dát otevřít
+            // kliknutím, jinak je to jen hláška. Otevření aplikace zároveň
+            // resetuje rozpočet a NexusRelayPlugin.handleOnResume() relay
+            // znovu nastartuje, takže ten text platí doslova.
+            PendingIntent otevriAplikaci = PendingIntent.getActivity(
+                this,
+                0,
+                new Intent(this, MainActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+            nm.notify(TIMEOUT_NOTIFICATION_ID, new NotificationCompat.Builder(this, TIMEOUT_CHANNEL_ID)
+                .setContentTitle(getString(R.string.relay_timeout_title))
+                .setContentText(getString(R.string.relay_timeout_text))
+                .setStyle(new NotificationCompat.BigTextStyle().bigText(getString(R.string.relay_timeout_text)))
+                .setSmallIcon(android.R.drawable.stat_notify_error)
+                .setCategory(NotificationCompat.CATEGORY_ERROR)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setContentIntent(otevriAplikaci)
+                .setAutoCancel(true)
+                .build());
+        } catch (Exception e) {
+            Log.w(TAG, "Nepodařilo se oznámit zastavení relay", e);
+        }
     }
 
     @Override
@@ -351,6 +480,16 @@ public class NexusRelayForegroundService extends Service {
         );
         channel.setDescription(getString(R.string.relay_service_channel_desc));
         nm.createNotificationChannel(channel);
+
+        // Zastavení relay je zpráva, která nesmí zapadnout mezi tiché servisní
+        // oznámení — proto vlastní kanál, který smí zvonit.
+        NotificationChannel timeoutChannel = new NotificationChannel(
+            TIMEOUT_CHANNEL_ID,
+            getString(R.string.relay_timeout_channel_name),
+            NotificationManager.IMPORTANCE_HIGH
+        );
+        timeoutChannel.setDescription(getString(R.string.relay_timeout_channel_desc));
+        nm.createNotificationChannel(timeoutChannel);
     }
 
     // ── Call state ────────────────────────────────────────────────────────────

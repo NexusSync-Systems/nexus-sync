@@ -15,6 +15,13 @@
     <string name="relay_service_title_problem">Nexus Relay is stuck</string>
     <string name="relay_potrebuje_prihlaseni">Sign-in expired — open the app to reconnect</string>
     <string name="relay_server_odmita">Server rejected this device — open the app</string>
+    <!-- Když Android vyčerpá rozpočet popředové služby, trvalé oznámení zmizí
+         i se službou. Tohle je jediná stopa, která po relay zůstane — proto
+         vlastní kanál s vyšší důležitostí, ne ten tichý servisní. -->
+    <string name="relay_timeout_title">Nexus Relay stopped</string>
+    <string name="relay_timeout_text">Android ended the background service — open the app to start it again</string>
+    <string name="relay_timeout_channel_name">Relay stopped</string>
+    <string name="relay_timeout_channel_desc">Warns that Android ended the relay background service</string>
     <string name="ghost_call_incoming">Incoming call…</string>
     <string name="ghost_call_accept">Accept</string>
     <string name="ghost_call_decline">Decline</string>

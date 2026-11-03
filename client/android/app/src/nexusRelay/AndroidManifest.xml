@@ -9,7 +9,8 @@
 
   Relay se do Obchodu nedává, instaluje se stranou.
 -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.READ_SMS" />
@@ -24,8 +25,40 @@
     <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
 
+    <!-- Viz NexusRelayForegroundService níž: relay běží na typu specialUse,
+         plná aplikace zůstává na dataSync. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
 
     <application>
+
+        <!--
+          Relay běží nepřetržitě na telefonu, ke kterému nikdo nesedí.
+
+          Sdílený manifest deklaruje typ dataSync. Tomu dává Android 15 a výš
+          rozpočet 6 hodin na 24 hodin: po jeho vyčerpání službu ukončí a
+          další start odmítne (ForegroundServiceStartNotAllowedException),
+          dokud někdo aplikaci neotevře na popředí. Jedině to časovač resetuje
+          — a na relay telefonu v šuplíku se to nestane. Relay by tedy po pár
+          hodinách umlkl a sám se už nerozjel.
+
+          specialUse tomuhle limitu nepodléhá. Google Play k němu chce
+          samostatné zdůvodnění, jenže relay se do Obchodu nedává, instaluje
+          se stranou — tak ať ho platí jen tahle příchuť. Plná aplikace proto
+          zůstává na dataSync a o schválení žádat nemusí.
+
+          dataSync je v seznamu schválně i tady: konstanta SPECIAL_USE je až
+          od Androidu 14 a na starším telefonu služba startuje pod dataSync.
+          Viz NexusRelayForegroundService.typPopredoveSluzby().
+        -->
+        <service
+                android:name=".NexusRelayForegroundService"
+                android:foregroundServiceType="specialUse|dataSync"
+                tools:replace="android:foregroundServiceType">
+                <property
+                    android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                    android:value="Forwards SMS and call events from a dedicated relay handset to the operator console; must keep running unattended around the clock." />
+            </service>
 
         <receiver
                 android:name=".NexusSmsReceiver"

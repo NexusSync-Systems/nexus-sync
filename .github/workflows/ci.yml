@@ -210,7 +210,19 @@ jobs:
           npm install --legacy-peer-deps --prefer-offline --no-audit
           cd client && npm install --legacy-peer-deps --prefer-offline --no-audit
 
+      # Vlastní limit, kratší než limit celé úlohy.
+      #
+      # `--with-deps` stahuje apt balíčky z ubuntu mirroru a ten se občas
+      # zadrhne — 27. 10. 2026 trval tenhle krok přes 20 minut a sebral celý
+      # rozpočet úlohy, takže testy se vůbec nespustily a ve výsledku stálo
+      # jen „timed out". S limitem tady spadne krok, který za to může, a je
+      # z běhu poznat, že šlo o stahování, ne o regresi.
+      #
+      # Instalují se VŠECHNY prohlížeče schválně: test:all:e2e nemá
+      # --project, takže běží i firefox a webkit (viz playwright.config.js).
+      # Zúžit instalaci na chromium by ty dva projekty shodilo.
       - name: Install Playwright Browsers and system dependencies
+        timeout-minutes: 15
         run: npx playwright install --with-deps
 
       # BEZ TOHOHLE KROKU TESTUJE CI NASAZENOU PRODUKCI, NE TENHLE PR.
@@ -277,6 +289,20 @@ jobs:
         run: npm run test:all:e2e
         env:
           FRONTEND_URL: ${{ secrets.FRONTEND_URL || 'https://nexus-sync-8d50b.web.app' }}
+
+      # Jediná věc, kterou měl zrušený workflow „QA: E2E Testing Suite" a tenhle
+      # job ne. Bez reportu zbývá po spadlém testu jen řádek v logu — žádná
+      # trasa, žádný snímek, žádné video, přesně ve chvíli, kdy jsou potřeba.
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 30
+          if-no-files-found: ignore
 
   # ── Kontrola oprávnění v manifestech ────────────────────────────────────────
   #
@@ -352,6 +378,41 @@ jobs:
 
           [ "$CHYBA" = 0 ] && echo "OK: plná aplikace je bez SMS oprávnění, relay je má."
           exit $CHYBA
+
+      # Android 15+ dává typu dataSync rozpočet 6 hodin na 24 a po jeho
+      # vyčerpání službu ukončí; časovač resetuje jedině otevření aplikace na
+      # popředí, což se na relay telefonu v šuplíku nestane. Relay proto běží
+      # na specialUse. Plná aplikace ho mít NESMÍ — Google Play k němu chce
+      # samostatné zdůvodnění a ona ho nepotřebuje.
+      - name: Relay runs on specialUse, full app stays on dataSync
+        run: |
+          FULL=client/android/app/build/intermediates/merged_manifests/nexusFullDebug/processNexusFullDebugManifest/AndroidManifest.xml
+          RELAY=client/android/app/build/intermediates/merged_manifests/nexusRelayDebug/processNexusRelayDebugManifest/AndroidManifest.xml
+          CHYBA=0
+
+          grep -q 'android:foregroundServiceType="specialUse' "$RELAY" || {
+            echo "::error::Relay neběží na specialUse — Android 15 mu službu po 6 hodinách ukončí a sám se už nerozjede."
+            CHYBA=1; }
+          grep -q 'android.permission.FOREGROUND_SERVICE_SPECIAL_USE' "$RELAY" || {
+            echo "::error::Relay nedeklaruje FOREGROUND_SERVICE_SPECIAL_USE — startForeground se specialUse by spadl."
+            CHYBA=1; }
+
+          if grep -q 'android.permission.FOREGROUND_SERVICE_SPECIAL_USE' "$FULL"; then
+            echo "::error::Plná aplikace deklaruje FOREGROUND_SERVICE_SPECIAL_USE — Google Play k němu chce zvláštní zdůvodnění a ona ho nepotřebuje. Patří jen do src/nexusRelay."
+            CHYBA=1
+          fi
+
+          [ "$CHYBA" = 0 ] && echo "OK: relay na specialUse, plná aplikace bez něj."
+          exit $CHYBA
+
+      # Typ si sdílený kód vybírá podle toho, co má příchuť v manifestu. Když
+      # se ta úvaha splete, nepřijde varování — plná aplikace spadne až na
+      # telefonu na startForeground.
+      - name: Foreground service type picker
+        run: |
+          cd client/android
+          ./gradlew :app:testNexusRelayDebugUnitTest --no-daemon \
+            --tests 'com.nexushub.app.NexusRelayForegroundServiceTest'
 
   # ── Android APK Build ───────────────────────────────────────────────────────
   build-android:
@@ -589,10 +650,79 @@ jobs:
             STRICT_RUNTIME_SECRETS=true node scripts/audit-runtime-secrets.js
             npm install
             ./node_modules/.bin/prisma generate
-            # Aplikuj čekající migrace na prod DB. Bez tohohle kroku se regeneroval jen
-            # Prisma klient (podle schématu), ale DB zůstala pozadu → dotazy na nové
-            # tabulky/relace (např. GpsTrackerLocation) padaly na 500. migrate deploy je
-            # bezpečný (jen aplikuje již vytvořené migrace, nic negeneruje/neshazuje).
+
+            # ── Brána: čekající migrace jen přes ověřenou zálohu ───────────────
+            #
+            # Tady dřív stálo, že `migrate deploy` je bezpečný, protože „nic
+            # negeneruje/neshazuje". To už neplatí. Aplikuje migrace tak, jak
+            # jsou napsané, a 20261027000001_blacklist_reasons ZAHAZUJE sloupce
+            # s volným textem. Po jejím proběhnutí není z čeho je vzít zpět
+            # a v celém řetězci sync-backend → deploy-backend nebyla záloha.
+            #
+            # Zálohuje se JEN když něco čeká. Když ne, denní záloha z cronu
+            # stačí a dump navíc by prodloužil každý deploy o minuty.
+            #
+            # Stav se pozná z VÝPISU, ne z návratového kódu: `migrate status`
+            # vrací nenulu i při nedostupné databázi, takže samotný kód
+            # nerozliší „něco čeká" od „nevím". Obě hlášky jsou ověřené proti
+            # prisma 6.1.0 (node_modules/prisma/build/index.js).
+            #
+            # CO BRÁNA NEPOZNÁ: `migrate status` čte tabulku _prisma_migrations
+            # a porovnává ji se složkou prisma/migrations. Skutečnou strukturu
+            # databáze NEKONTROLUJE — ruční `ALTER TABLE` na produkci historii
+            # nezmění, takže status dál hlásí „up to date" a záloha se nevezme.
+            # Na schema drift tedy tahle brána není a nikdy nebude; od toho je
+            # samostatná úloha Schema Drift Check a `prisma migrate diff`.
+            # Brána hlídá jen to, co umí: aby MIGRACE neproběhla bez zálohy.
+            stav="$(./node_modules/.bin/prisma migrate status 2>&1 || true)"
+            printf '%s\n' "$stav"
+
+            if printf '%s' "$stav" | grep -q 'Database schema is up to date'; then
+              echo "→ Nic nečeká, zálohu nepotřebuji."
+            elif printf '%s' "$stav" | grep -q 'Following migration.* have not yet been applied'; then
+              echo "→ Čekající migrace. Nejdřív ověřená záloha, pak teprve migrace."
+
+              # Bez pg_dump/pg_restore nejde záloha ani pořídit, ani ověřit.
+              # Radši sem spadne deploy s jasnou hláškou, než aby migrace
+              # proběhla nezajištěná.
+              for n in pg_dump pg_restore; do
+                if ! command -v "$n" >/dev/null 2>&1; then
+                  echo "❌ Chybí $n — zálohu nelze pořídit. Migraci nepouštím."
+                  echo "   Na serveru: apt-get install -y postgresql-client"
+                  exit 1
+                fi
+              done
+
+              # backup-postgres.sh si sám ověří velikost, čitelnost
+              # (pg_restore --list) i checksum; při jakékoli chybě vadný soubor
+              # smaže a skončí nenulově. Vlastní adresář a delší retence proto,
+              # že tahle záloha je poslední stav PŘED nevratnou změnou — ta se
+              # nemá protáčet po čtrnácti dnech spolu s běžnými dumpy.
+              #
+              # Explicitní `if !` je potřeba: ssh-action nemá script_stop, takže
+              # samotné selhání příkazu běh nezastaví (proto jsou výš u Stripe
+              # kontrol taky ruční `exit 1`).
+              if ! BACKUP_DIR=/var/backups/nexus-pred-migraci \
+                   RETENTION_DAYS=90 \
+                   bash scripts/backup-postgres.sh; then
+                echo "❌ Záloha neprošla. Migraci NEPOUŠTÍM, databáze zůstává, jak je."
+                exit 1
+              fi
+              echo "→ Záloha ověřena, pokračuji migrací."
+            else
+              # Sem spadne rozejitá historie migrací, databáze, kterou Prisma
+              # nespravuje, i nedostupná databáze. V žádném z těch stavů nemá
+              # `migrate deploy` co dělat naslepo.
+              #
+              # Pozor: rozejitá historie taky obsahuje „have not yet been
+              # applied", proto se výš hledá celá hláška „Following migration…
+              # have not yet been applied", ne jen její konec.
+              echo "❌ Stav migrací se nepodařilo určit (výpis výše)."
+              echo "   Rozejitá historie, neřízená databáze, nebo nedostupná databáze."
+              echo "   Deploy zastavuji — tohle chce člověka."
+              exit 1
+            fi
+
             ./node_modules/.bin/prisma migrate deploy
             pm2 restart nexus-backend-final --update-env || pm2 start server.js --name nexus-backend-final
             sleep 3
@@ -707,5 +837,69 @@ jobs:
           OPS_SMOKE_CALLER:           ${{ vars.RELAY_TEST_CALLER_PHONE || '+420000000001' }}
           OPS_MAX_MESSAGE_AGE_DAYS:   '7'
           STRICT_OPERATIONAL_HEALTH:  'true'
+
+  # Pojistka, která se tiše přeskočí, není pojistka.
+  #
+  # relay-field-test se neprovede ze tří důvodů a všechny tři vypadají
+  # v přehledu běhu stejně nevinně — jako „skipped":
+  #   1. RELAY_FIELD_TEST_ENABLED není 'true' (dnes v repozitáři není ani
+  #      jedna proměnná, takže je vypnutý);
+  #   2. chybí secrety, které potřebuje — po zapnutí by spadl na preflightu
+  #      v scripts/relay-field-test.sh;
+  #   3. spadl deploy-backend, na kterém visí.
+  #
+  # Tahle úloha proto na deploy-backend SCHVÁLNĚ nezávisí: kdyby na něm
+  # visela, mlčela by přesně v těch situacích, kvůli kterým vznikla.
+  #
+  # Nezhazuje build. Jestli terénní test zapnout a dodat mu údaje, je
+  # rozhodnutí člověka — tahle úloha jen zajišťuje, aby se to rozhodovalo
+  # vědomě, a ne mlčením.
+  relay-field-test-stav:
+    name: Relay Field Test — stav pojistky
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+
+    steps:
+      # Secrety se testují jen na prázdnotu (secrets.X != ''), takže se do
+      # logu nedostane žádná hodnota — ani zamaskovaná.
+      - name: Je terénní test vyzbrojený?
+        env:
+          ZAPNUTO:     ${{ vars.RELAY_FIELD_TEST_ENABLED }}
+          MA_API:      ${{ secrets.API_BASE_URL != '' }}
+          MA_SECRET:   ${{ secrets.NEXUS_DEVICE_SECRET != '' }}
+          MA_INSTAL:   ${{ secrets.RELAY_INSTALLATION_ID != '' }}
+          MA_PROFIL:   ${{ secrets.RELAY_PROFILE_ID != '' }}
+          MA_OWNER_M:  ${{ secrets.TEST_OWNER_EMAIL != '' }}
+          MA_OWNER_P:  ${{ secrets.TEST_OWNER_PASSWORD != '' }}
+        run: |
+          CHYBI=""
+          [ "$MA_API"     = "true" ] || CHYBI="$CHYBI API_BASE_URL"
+          [ "$MA_SECRET"  = "true" ] || CHYBI="$CHYBI NEXUS_DEVICE_SECRET"
+          [ "$MA_INSTAL"  = "true" ] || CHYBI="$CHYBI RELAY_INSTALLATION_ID"
+          [ "$MA_PROFIL"  = "true" ] || CHYBI="$CHYBI RELAY_PROFILE_ID"
+          [ "$MA_OWNER_M" = "true" ] || CHYBI="$CHYBI TEST_OWNER_EMAIL"
+          [ "$MA_OWNER_P" = "true" ] || CHYBI="$CHYBI TEST_OWNER_PASSWORD"
+
+          echo "### Relay Field Test — stav pojistky" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$ZAPNUTO" = "true" ] && [ -z "$CHYBI" ]; then
+            echo "Vyzbrojená: proměnná zapnutá a všechny potřebné secrety nastavené." >> "$GITHUB_STEP_SUMMARY"
+            echo "OK: terénní test je vyzbrojený."
+            exit 0
+          fi
+
+          echo "**Neprovede se.** Přeposílání na relay telefonu tedy po tomhle nasazení nikdo neověří." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$ZAPNUTO" != "true" ]; then
+            echo "- Vypnutý: \`RELAY_FIELD_TEST_ENABLED\` není \`true\` (teď: \`${ZAPNUTO:-nenastaveno}\`)." >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Relay field test je vypnutý (RELAY_FIELD_TEST_ENABLED != true) — přeposílání na telefonu nic nehlídá."
+          fi
+
+          if [ -n "$CHYBI" ]; then
+            echo "- Chybí secrety:$CHYBI" >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Relay field testu chybí secrety:$CHYBI — i po zapnutí by spadl na preflightu."
+          fi
 
 

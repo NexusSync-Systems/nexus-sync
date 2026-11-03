@@ -83,13 +83,79 @@ curl_call() {
   rm -f "$tmpfile"
 }
 
+# ─── Redakce odpovědí pro log ───────────────────────────────────────────────
+# Odpovědi serveru nesou obsah SMS, telefonní čísla a jména kontaktů. Do logu
+# běhu CI to nepatří: přečte si ho každý, kdo má přístup k repozitáři, a jsou
+# to údaje cizích lidí, ne naše.
+#
+# Vypisuje se proto jen diagnostická kostra — typ, počet prvků, názvy klíčů —
+# a ostatní hodnoty se nahradí značkou s typem a délkou. Pořád je tedy vidět
+# „pole osmi objektů s klíči id/body/externalId", což je na odladění
+# endpointu to podstatné, ale obsah zpráv v logu nekončí.
+#
+# Chybová hlášení se nechávají, jinak by log neřekl, PROČ požadavek spadl.
+# message a detail se berou jen z nejvyšší úrovně: tam je to text chyby,
+# zatímco obsah zprávy leží vždy hlouběji, v poli zpráv.
+#
+# Když se odpověď nepodaří přečíst jako JSON (nebo chybí python3), vypíše se
+# jen délka. Nikdy ne surové tělo — i tenhle pád musí být bezpečný.
+redact_body() {
+  local raw="${1:-}"
+  if [ -z "$raw" ]; then
+    echo "(prázdná odpověď)"
+    return 0
+  fi
+  printf '%s' "$raw" | python3 -c '
+import sys, json
+
+DIAG_VSUDE = {"error", "code", "statusCode", "status", "success", "ok", "reason"}
+DIAG_JEN_NAHORE = {"message", "detail"}
+LIMIT = 200
+
+def znacka(v):
+    if isinstance(v, bool):
+        return "<bool>"
+    if isinstance(v, str):
+        return "<text:%d>" % len(v)
+    if isinstance(v, (int, float)):
+        return "<cislo>"
+    if v is None:
+        return None
+    return "<?>"
+
+def kostra(v, hloubka=0):
+    if isinstance(v, dict):
+        if hloubka > 3:
+            return "<objekt: %d klicu>" % len(v)
+        out = {}
+        for k, hodnota in v.items():
+            povoleno = k in DIAG_VSUDE or (hloubka == 0 and k in DIAG_JEN_NAHORE)
+            if povoleno and (isinstance(hodnota, (str, int, float, bool)) or hodnota is None):
+                out[k] = hodnota[:LIMIT] if isinstance(hodnota, str) else hodnota
+            else:
+                out[k] = kostra(hodnota, hloubka + 1)
+        return out
+    if isinstance(v, list):
+        if not v:
+            return []
+        return ["<pole: %d prvku, prvni:>" % len(v), kostra(v[0], hloubka + 1)]
+    return znacka(v)
+
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+print(json.dumps(kostra(data), ensure_ascii=False)[:600])
+' 2>/dev/null || echo "(nelze přečíst jako JSON; ${#raw} B)"
+}
+
 check_status() {
   local label="$1" expected="$2"
   if [ "$HTTP_STATUS" = "$expected" ]; then
     ok "$label (HTTP $HTTP_STATUS)"
   else
     fail "$label — expected HTTP $expected, got HTTP $HTTP_STATUS"
-    echo "       Body: ${BODY:0:300}"
+    echo "       Body: $(redact_body "$BODY")"
   fi
 }
 
@@ -99,7 +165,7 @@ check_body_contains() {
     ok "$label (HTTP $HTTP_STATUS)"
   else
     fail "$label — HTTP $HTTP_STATUS, body missing '$needle'"
-    echo "       Body: ${BODY:0:300}"
+    echo "       Body: $(redact_body "$BODY")"
   fi
 }
 
@@ -114,7 +180,19 @@ for var in API_BASE DEVICE_SECRET INSTALLATION_ID PROFILE_ID; do
     echo "  ✗ Missing: $var"
     missing=$((missing+1))
   else
-    echo "  ✓ $var = ${val:0:50}$([ ${#val} -gt 50 ] && echo '...' || true)"
+    case "$var" in
+      # Přihlašovací tajemství do logu nepatří ani zkrácené. GitHub Actions
+      # maskují PŘESNOU hodnotu secretu, takže 50znakový prefix delšího klíče
+      # té masce unikne — a při lokálním spuštění se nemaskuje nic. Pro
+      # diagnostiku stačí, že je proměnná vyplněná, a její délka.
+      #
+      # Vzorek místo výčtu, aby nová tajná proměnná v seznamu výš nevypadla
+      # do logu jen proto, že si na ni někdo nevzpomněl.
+      *SECRET*|*PASSWORD*|*TOKEN*)
+        echo "  ✓ $var je nastaveno (${#val} znaků)" ;;
+      *)
+        echo "  ✓ $var = ${val:0:50}$([ ${#val} -gt 50 ] && echo '...' || true)" ;;
+    esac
   fi
 done
 if [ "$missing" -gt 0 ]; then
@@ -248,7 +326,7 @@ if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "401" ]; then
   fi
 else
   fail "[7] Outbox endpoint returned unexpected HTTP $HTTP_STATUS"
-  echo "       Body: ${BODY:0:200}"
+  echo "       Body: $(redact_body "$BODY")"
 fi
 
 # =============================================================================
@@ -291,11 +369,11 @@ for c in data:
           ok "[8c] Message from step [2] persisted in DB ✓"
         else
           fail "[8c] Message NOT found in DB"
-          echo "       Body (first 400): ${BODY:0:400}"
+          echo "       Body: $(redact_body "$BODY")"
         fi
       else
         fail "[8b] Chat NOT found for ${CALLER_PHONE} in DB"
-        echo "       Chats body (first 300): ${BODY:0:300}"
+        echo "       Chats body: $(redact_body "$BODY")"
       fi
     else
       fail "[8a] GET /chats failed — HTTP $HTTP_STATUS"

@@ -81,11 +81,21 @@ jobs:
             echo "ANDROID_SIGNING_KEY_ALIAS=${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}"
           } >> "$GITHUB_ENV"
 
-      - name: Verze buildu
+      # Minor zvyšujeme jen LOKÁLNĚ pro tenhle běh, stejně jako build-android
+      # v ci.yml. Na master se bump necommituje — je chráněný a přímý push z CI
+      # by skončil na GH006 (viz 5c16c075). Monotonii versionCode zajišťuje
+      # GITHUB_RUN_NUMBER v build.gradle.
+      #
+      # Dokud tenhle krok chyběl, dostal AAB verzi z neupraveného souboru,
+      # kdežto APK ze stejného commitu verzi o jedničku vyšší: první vydaný
+      # AAB nesl 3.154, zatímco APK z té samé revize 3.155.
+      - name: Verze buildu (jen lokálně, bez pushe)
         run: |
           PROPS="client/android/version.properties"
+          CURRENT=$(grep "^VERSION_MINOR=" "$PROPS" | cut -d= -f2)
+          MINOR=$((CURRENT + 1))
+          sed -i "s/^VERSION_MINOR=${CURRENT}$/VERSION_MINOR=${MINOR}/" "$PROPS"
           MAJOR=$(grep "^VERSION_MAJOR=" "$PROPS" | cut -d= -f2)
-          MINOR=$(grep "^VERSION_MINOR=" "$PROPS" | cut -d= -f2)
           echo "VERZE=v${MAJOR}.${MINOR}-b${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
           echo "Verze: v${MAJOR}.${MINOR}-b${GITHUB_RUN_NUMBER}"
           echo "Poznámka: ${{ inputs.poznamka }}"
@@ -106,7 +116,10 @@ jobs:
           npx cap sync android
           cd android
           chmod +x gradlew
-          ./gradlew bundleNexusFullRelease --no-daemon
+          # Minor už zvýšil krok „Verze buildu" výš. Bez tohohle přepínače by
+          # ho Gradle zvýšil podruhé a AAB by nesl jinou verzi, než je v názvu
+          # souboru a ve VITE_APP_VERSION.
+          ./gradlew bundleNexusFullRelease --no-daemon -PskipVersionIncrement=true
 
       - name: Build relay AAB (release)
         if: ${{ inputs.postavit_relay }}
@@ -120,7 +133,9 @@ jobs:
           npx cap sync android
           cd android
           chmod +x gradlew
-          ./gradlew bundleNexusRelayRelease --no-daemon
+          # Totéž co u plné aplikace — a navíc: oba AAB z jednoho běhu musí
+          # nést stejnou verzi, jinak by relay vyjel o jedničku výš než full.
+          ./gradlew bundleNexusRelayRelease --no-daemon -PskipVersionIncrement=true
 
       - name: Posbírat AAB
         run: |
@@ -159,6 +174,31 @@ jobs:
             fi
             echo "OK: $aab podepsán očekávaným klíčem."
           done
+
+      # Verze uvnitř AAB musí souhlasit s názvem souboru a s VITE_APP_VERSION.
+      # Přesně tohle se rozešlo: Gradle u příchuťových úloh verzi nezvyšoval,
+      # takže soubor se jmenoval jinak, než co bylo uvnitř — a poznat to šlo
+      # jedině rozbalením AAB. Teď to najde build, ne člověk v Play Console.
+      # (bundletool na runneru není, proto se čte proto-manifest přes strings.)
+      - name: Ověřit verzi v AAB
+        run: |
+          CEKAM="${VERZE#v}"
+          CHYBA=0
+          for aab in vystup/*.aab; do
+            UVNITR=$(unzip -p "$aab" base/manifest/AndroidManifest.xml \
+              | strings | grep -oE '[0-9]+\.[0-9]+-b[0-9]+(-[a-z]+)?' | head -1)
+            # Celá verze a nejvýš přípona příchuti (versionNameSuffix níž
+            # v build.gradle). Prefix by nestačil: vzor „3.155-b1*" propustí
+            # i „3.155-b10-full", tedy build z úplně jiného běhu.
+            case "$UVNITR" in
+              "$CEKAM"|"$CEKAM"-full|"$CEKAM"-relay)
+                echo "OK: $aab nese verzi $UVNITR." ;;
+              *)
+                echo "::error::$aab nese verzi '$UVNITR', čekáno '$CEKAM' — název souboru a obsah se rozcházejí."
+                CHYBA=1 ;;
+            esac
+          done
+          exit $CHYBA
 
       - name: Připnout AAB jako artefakt
         uses: actions/upload-artifact@v4
