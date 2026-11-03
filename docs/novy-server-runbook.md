@@ -357,7 +357,23 @@ Bod 2 je nutný kvůli slepičímu problému: rozvoz APK jde přes backend, na k
 
 Rozvoz APK jde přes `API_BASE_URL/api/vultr/upload-apk`, tedy přes tenhle backend. Dokud neběží, nedostanete na telefony ani novou verzi — včetně opravy šestihodinového limitu z #139, kterou relay telefony pořád nemají.
 
-## 10. Na závěr
+## 10. Co na novém serveru není: Asterisk, tedy hovory
+
+Nainstaloval jsem backend, PostgreSQL a nginx. **Asterisk ne**, takže hovory přes SIP na novém serveru nefungují. SMS jimi nejsou dotčené — ty jdou přes relay telefon, viz `docs/relay-hovory-a-sms.md`.
+
+Projevuje se to v klientu takhle: `client/src/components/sip/SipManager.jsx` čte `VITE_SIP_WS_URL`, která se **nikde nenastavuje**, takže padá na zapsané `wss://nexus-api.myvnc.com:8089/ws` — zaniklý server.
+
+Správná hodnota by byla `wss://api.nexusstack.eu:8089/ws`, protože podle `docs/asterisk/setup.sh` běžel Asterisk **na tomtéž stroji jako backend** a WSS na portu 8089 (`docs/asterisk/pjsip.conf`, `[transport-wss]`). **Nenastavujte ji ale dřív, než tam Asterisk skutečně poběží** — jinak klient bude otevírat spojení na port, kde nic neposlouchá, a vypadá to jako chyba aplikace, ne jako chybějící služba.
+
+Co je potřeba udělat, než ta hodnota začne platit:
+
+1. **Nainstalovat Asterisk** — `docs/asterisk/setup.sh` je na to napsaný, ale pozor: s `--domain` spouští `certbot certonly --standalone`, a to **obsadí port 80**, na kterém běží nginx. Certifikát pro `api.nexusstack.eu` navíc už existuje v `/etc/letsencrypt/live/`, takže ho stačí Asterisku nasměrovat (`cert_file` a `priv_key_file` v `pjsip.conf`) a certbot nepouštět vůbec.
+2. **Otevřít port 8089** — a to **ve dvou vrstvách**: v bezpečnostním seznamu u Oracle i v lokálním iptables, který na tom obrazu pouští jen 22, 80 a 443. Viz oddíl 6.
+3. **Zvážit paměť.** Asterisk vedle Node a PostgreSQL na 952 MB a jednom jádře je optimistické. Tohle je ten případ, kdy se vyplatí získat ARM stroj s 12 GB.
+
+**Pro pilot to blokátor není.** `docs/pilot-readiness-checklist.md` nezmiňuje SIP, hovory ani Asterisk ani jednou — brána 5 je celá o SMS. Pokud ale pilot má hovory obsahovat, patří do checklistu jedenáctá… respektive další brána, protože dnes to neověřuje nic.
+
+## 11. Na závěr
 
 Projděte `docs/pilot-readiness-checklist.md`. Po postavení serveru by měly jít vyhodnotit brány, které dosud nešly vůbec — 3 (záloha), 4 (Stripe webhook), 5 (relay), 6 (RBAC proti endpointům), 7 (monitoring) a 8 (manuální smoke).
 
