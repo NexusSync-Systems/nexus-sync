@@ -838,4 +838,68 @@ jobs:
           OPS_MAX_MESSAGE_AGE_DAYS:   '7'
           STRICT_OPERATIONAL_HEALTH:  'true'
 
+  # Pojistka, která se tiše přeskočí, není pojistka.
+  #
+  # relay-field-test se neprovede ze tří důvodů a všechny tři vypadají
+  # v přehledu běhu stejně nevinně — jako „skipped":
+  #   1. RELAY_FIELD_TEST_ENABLED není 'true' (dnes v repozitáři není ani
+  #      jedna proměnná, takže je vypnutý);
+  #   2. chybí secrety, které potřebuje — po zapnutí by spadl na preflightu
+  #      v scripts/relay-field-test.sh;
+  #   3. spadl deploy-backend, na kterém visí.
+  #
+  # Tahle úloha proto na deploy-backend SCHVÁLNĚ nezávisí: kdyby na něm
+  # visela, mlčela by přesně v těch situacích, kvůli kterým vznikla.
+  #
+  # Nezhazuje build. Jestli terénní test zapnout a dodat mu údaje, je
+  # rozhodnutí člověka — tahle úloha jen zajišťuje, aby se to rozhodovalo
+  # vědomě, a ne mlčením.
+  relay-field-test-stav:
+    name: Relay Field Test — stav pojistky
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+
+    steps:
+      # Secrety se testují jen na prázdnotu (secrets.X != ''), takže se do
+      # logu nedostane žádná hodnota — ani zamaskovaná.
+      - name: Je terénní test vyzbrojený?
+        env:
+          ZAPNUTO:     ${{ vars.RELAY_FIELD_TEST_ENABLED }}
+          MA_API:      ${{ secrets.API_BASE_URL != '' }}
+          MA_SECRET:   ${{ secrets.NEXUS_DEVICE_SECRET != '' }}
+          MA_INSTAL:   ${{ secrets.RELAY_INSTALLATION_ID != '' }}
+          MA_PROFIL:   ${{ secrets.RELAY_PROFILE_ID != '' }}
+          MA_OWNER_M:  ${{ secrets.TEST_OWNER_EMAIL != '' }}
+          MA_OWNER_P:  ${{ secrets.TEST_OWNER_PASSWORD != '' }}
+        run: |
+          CHYBI=""
+          [ "$MA_API"     = "true" ] || CHYBI="$CHYBI API_BASE_URL"
+          [ "$MA_SECRET"  = "true" ] || CHYBI="$CHYBI NEXUS_DEVICE_SECRET"
+          [ "$MA_INSTAL"  = "true" ] || CHYBI="$CHYBI RELAY_INSTALLATION_ID"
+          [ "$MA_PROFIL"  = "true" ] || CHYBI="$CHYBI RELAY_PROFILE_ID"
+          [ "$MA_OWNER_M" = "true" ] || CHYBI="$CHYBI TEST_OWNER_EMAIL"
+          [ "$MA_OWNER_P" = "true" ] || CHYBI="$CHYBI TEST_OWNER_PASSWORD"
+
+          echo "### Relay Field Test — stav pojistky" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$ZAPNUTO" = "true" ] && [ -z "$CHYBI" ]; then
+            echo "Vyzbrojená: proměnná zapnutá a všechny potřebné secrety nastavené." >> "$GITHUB_STEP_SUMMARY"
+            echo "OK: terénní test je vyzbrojený."
+            exit 0
+          fi
+
+          echo "**Neprovede se.** Přeposílání na relay telefonu tedy po tomhle nasazení nikdo neověří." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$ZAPNUTO" != "true" ]; then
+            echo "- Vypnutý: \`RELAY_FIELD_TEST_ENABLED\` není \`true\` (teď: \`${ZAPNUTO:-nenastaveno}\`)." >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Relay field test je vypnutý (RELAY_FIELD_TEST_ENABLED != true) — přeposílání na telefonu nic nehlídá."
+          fi
+
+          if [ -n "$CHYBI" ]; then
+            echo "- Chybí secrety:$CHYBI" >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Relay field testu chybí secrety:$CHYBI — i po zapnutí by spadl na preflightu."
+          fi
+
 
