@@ -187,10 +187,15 @@ jobs:
           for aab in vystup/*.aab; do
             UVNITR=$(unzip -p "$aab" base/manifest/AndroidManifest.xml \
               | strings | grep -oE '[0-9]+\.[0-9]+-b[0-9]+(-[a-z]+)?' | head -1)
+            # Celá verze a nejvýš přípona příchuti (versionNameSuffix níž
+            # v build.gradle). Prefix by nestačil: vzor „3.155-b1*" propustí
+            # i „3.155-b10-full", tedy build z úplně jiného běhu.
             case "$UVNITR" in
-              "$CEKAM"*) echo "OK: $aab nese verzi $UVNITR." ;;
-              *) echo "::error::$aab nese verzi '$UVNITR', čekáno '$CEKAM' — název souboru a obsah se rozcházejí."
-                 CHYBA=1 ;;
+              "$CEKAM"|"$CEKAM"-full|"$CEKAM"-relay)
+                echo "OK: $aab nese verzi $UVNITR." ;;
+              *)
+                echo "::error::$aab nese verzi '$UVNITR', čekáno '$CEKAM' — název souboru a obsah se rozcházejí."
+                CHYBA=1 ;;
             esac
           done
           exit $CHYBA
