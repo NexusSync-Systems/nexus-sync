@@ -27,11 +27,22 @@ import { initPushNotifications } from '../services/pushService';
 // API Configuration
 // IMPORTANT: Capacitor WebView ALWAYS reports hostname as 'localhost' even on a real device,
 // so we MUST use Capacitor.isNativePlatform() to distinguish native apps from web dev.
-const API_BASE = Capacitor.isNativePlatform()
-  ? 'https://nexus-api.myvnc.com/api'
-  : (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    ? 'http://localhost:5000'
-    : 'https://nexus-api.myvnc.com/api');
+//
+// VITE_API_URL má přednost a zapéká se při buildu (.github/workflows/ci.yml).
+// Dřív tady adresa byla NATVRDO a tenhle soubor jediný ji z prostředí nečetl —
+// přitom je to hlavní provider pro přihlášení i data. Správně nastavený build
+// tedy posílal zbytek aplikace na novou adresu, ale přihlášení pořád na
+// nexus-api.myvnc.com, server, který už neexistuje. A protože se build i
+// nasazení povedly, nic na to neupozornilo.
+//
+// Zbývající hodnoty jsou jen záloha pro vývoj: nativní prostředí a prohlížeč
+// mimo localhost na starou adresu, localhost na místní backend.
+const API_BASE = import.meta.env.VITE_API_URL
+  || (Capacitor.isNativePlatform()
+    ? 'https://nexus-api.myvnc.com/api'
+    : (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+      ? 'http://localhost:5000'
+      : 'https://nexus-api.myvnc.com/api'));
 
 /**
  * Main Provider for Nexus Hub.
