@@ -5,7 +5,7 @@ const authMiddleware = require('../middleware/authMiddleware');
 
 router.use(authMiddleware);
 
-router.post('/incoming', (req, res) => ctrl.incomingSms(req, res));
+// POST /incoming je odstraněné — viz komentář v controllers/smsController.js.
 router.post('/send', (req, res) => ctrl.sendSms(req, res));
 
 module.exports = router;

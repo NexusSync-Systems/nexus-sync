@@ -1,32 +1,23 @@
 const { getIO } = require('../services/socket');
 const prisma = require('../services/db');
-const pushService = require('../services/pushService');
 
-exports.incomingSms = async (req, res) => {
-  try {
-    const { from, body, timestamp, installationId } = req.body;
-    const agencyId = req.user.agencyId; // Z relay JWT
-
-    if (!from || !body) {
-      return res.status(400).json({ error: 'Missing from or body' });
-    }
-
-    const io = getIO();
-    
-    // Přepošli všem operátorům v agentuře do prohlížeče
-    io.to(`agency_${agencyId}`).emit('sms:incoming', {
-      from,
-      body,
-      timestamp: timestamp || Date.now(),
-      installationId
-    });
-
-    res.json({ ok: true });
-  } catch (error) {
-    console.error('Incoming SMS error:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
-  }
-};
+// `incomingSms` a route POST /api/sms/incoming jsou odstraněné.
+//
+// Nikdy je nepoužíval relay, pro který byly napsané. Relay posílá příchozí
+// zprávy nativně na POST /api/device/relay (hlavičky X-Installation-Id
+// a X-Device-Secret, viz relayAuthMiddleware) a `deviceController.handleRelay`
+// je ULOŽÍ jako Message(direction: INBOUND) a teprve pak pošle do agentury
+// událost `new_message`. To je živá cesta a ta se nemění.
+//
+// Mrtvá cesta byla zároveň děravá: visela na `authMiddleware`, který pouští
+// každý platný session token, ne jen relay. Kterákoli přihlášená operátorka
+// tak mohla POSTem vyrobit `sms:incoming` s libovolným `from`, textem
+// i `installationId` a poslat ho na obrazovku všem v agentuře. Nic se
+// neukládalo do databáze, takže po tom nezůstal žádný záznam — ve callcentru
+// je to hotová pomůcka pro podvod. Komentář `// Z relay JWT` u `agencyId`
+// tu nepravdu držel naživu.
+//
+// Důkaz, že je to pryč: tests/smsIncomingPodvrzeni.test.js.
 
 /**
  * Odeslání SMS přes spárovaný relay telefon.
