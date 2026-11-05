@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Denní odvoz šifrované zálohy ze serveru na tenhle Mac.
+
+  PROČ TOHLE A NE CI: artefakty a logy veřejného repozitáře jsou veřejně ke
+  stažení, takže šifrovaná kopie produkční databáze by v artefaktu zůstala
+  natrvalo pro kohokoli. Dokud není nastavené Oracle Object Storage, je odvoz
+  na vlastní stroj jediná rozumná cesta.
+
+  Šablona — před instalací se v ní musí nahradit __REPO__.
+  Postup je v docs/jak-neprijit-o-server.md, oddíl o odvozu záloh.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>eu.nexusstack.odvoz-zalohy</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <!-- `-l` kvůli tomu, aby byl na PATH gpg z Homebrew; bez něj skript
+         nedokáže ověřit archiv rozšifrováním a jen hlasitě odvede neověřený. -->
+    <string>cd '__REPO__' &amp;&amp; exec bash scripts/odvez-zalohu.sh</string>
+  </array>
+
+  <!-- Noční záloha na serveru vzniká v 3:17 UTC. 5:40 místního času je po ní
+       s rezervou i v zimním čase. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>5</integer>
+    <key>Minute</key><integer>40</integer>
+  </dict>
+
+  <!-- Když Mac v 5:40 spal, launchd úlohu spustí po probuzení. Bez tohohle by
+       se u notebooku, který v noci spí, neodvezlo nikdy nic. -->
+  <key>RunAtLoad</key>
+  <false/>
+
+  <!-- Jediná stopa, kterou po sobě úloha nechá. Bez logu by se nepoznalo,
+       že odvoz tiše přestal fungovat — a to je přesně ta chyba, kterou
+       zálohy mají řešit. -->
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/nexus-odvoz-zalohy.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/nexus-odvoz-zalohy.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <!-- Nízká priorita: odvoz je 20 kB, nemá kvůli němu nic čekat. -->
+  <key>Nice</key>
+  <integer>10</integer>
+</dict>
+</plist>

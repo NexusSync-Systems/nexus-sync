@@ -122,8 +122,32 @@ jiná služba než instance, takže ztrátu instance přežije. Dump má 130 kB.
 Nastavit to chce OCI CLI a credentials na serveru — tedy něco, co musí udělat
 člověk s přístupem k OCI konzoli.
 
-Mezitím: spouštět `scripts/odvez-zalohu.sh` ručně, nebo si ho na Macu nechat
-spouštět přes `launchd`.
+#### Mezitím: denní odvoz na Mac přes launchd
+
+Šablona je `scripts/launchd/eu.nexusstack.odvoz-zalohy.plist` — běží v 5:40
+místního času, tedy po noční záloze. Když Mac v tu dobu spí, launchd úlohu
+spustí po probuzení.
+
+Instalace (nahradí cesty a zavede úlohu):
+
+```bash
+sed -e "s|__REPO__|$PWD|g" -e "s|__HOME__|$HOME|g" scripts/launchd/eu.nexusstack.odvoz-zalohy.plist > ~/Library/LaunchAgents/eu.nexusstack.odvoz-zalohy.plist && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/eu.nexusstack.odvoz-zalohy.plist && launchctl kickstart -p gui/$(id -u)/eu.nexusstack.odvoz-zalohy
+```
+
+Odinstalace:
+
+```bash
+launchctl bootout gui/$(id -u)/eu.nexusstack.odvoz-zalohy && rm ~/Library/LaunchAgents/eu.nexusstack.odvoz-zalohy.plist
+```
+
+Log je `~/Library/Logs/nexus-odvoz-zalohy.log`. **Dívat se do něj je jediný
+způsob, jak poznat, že odvoz přestal fungovat** — launchd nikoho neupozorní
+a hlídka v CI o tomhle Macu neví nic.
+
+Ověření, že je zavedená: `launchctl print gui/$(id -u)/eu.nexusstack.odvoz-zalohy | head -5`
+
+K ověřování archivu potřebuje skript heslo v `~/.nexus-zaloha-heslo` (mód 600),
+jinak zálohu odveze, ale nahlas oznámí, že ji neověřil.
 
 ### Heslo k zálohám nemá potvrzenou kopii mimo server
 
