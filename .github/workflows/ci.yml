@@ -797,30 +797,36 @@ jobs:
             -w "\nHTTP Status: %{http_code}\n"
           cat response_full.json
 
-  sync-backend:
-    name: Sync Server to Backend Repo
-    runs-on: ubuntu-latest
-    needs: [test, e2e-tests]
-    if: github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Push subtree to nexus-backend
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git subtree split --prefix=server -b server-only
-          git remote add backend https://github.com/NexusSync-Systems/nexus-backend.git
-          git config --global http.https://github.com/.extraheader "AUTHORIZATION: basic $(echo -n x-access-token:${{ secrets.SYNC_BACKEND_TOKEN }} | base64)"
-          git push backend server-only:master --force
+  # ── Úloha `sync-backend` byla odstraněna 5. 11. 2026 ─────────────────────
+  #
+  # Vynuceně tlačila složku `server/` jako subtree do zrcadla
+  # `NexusSync-Systems/nexus-backend`. Mělo to smysl, dokud si server kód
+  # odtamtud stahoval `git pull`em. Od #155 ho doručuje rsync přímo z téhle
+  # pipeline a na serveru `.git` vůbec není — ověřeno.
+  #
+  # Zbyla po tom past. Zrcadlo má VLASTNÍ `deploy.yml`, který na push do
+  # masteru dělá na serveru `git reset --hard origin/master` a `git pull`.
+  # Každý push z téhle úlohy ho spustil a on pokaždé selhal, protože
+  # `SERVER_IP` a `SSH_PRIVATE_KEY` v tom repozitáři jsou z března 2026, tedy
+  # od smazaného VPS. Jen 5. 11. 2026 tak vznikla tři selhání za sebou.
+  #
+  # Nebezpečné by to bylo ve chvíli, kdy by ty secrety někdo přepsal na nový
+  # server: začal by dělat `git reset --hard` na stroji bez `.git` a přehazoval
+  # by si s `deploy-backend` `.env` a restarty pm2.
+  #
+  # `deploy-backend` navíc na téhle úloze viselo přes `needs`, takže skutečné
+  # nasazení záviselo na kroku, jehož jediný efekt bylo spustit to selhávající.
+  #
+  # Samotný repozitář `nexus-backend` zůstává; bez nových pushů se jeho
+  # nasazení prostě nespustí. Jestli ho archivovat, je rozhodnutí na člověku.
+  # Secret `SYNC_BACKEND_TOKEN` v tomhle repozitáři už nic nepoužívá.
 
   deploy-backend:
     name: Deploy Backend (SSH)
     runs-on: ubuntu-latest
-    needs: [sync-backend]
+    # Dřív `needs: [sync-backend]`. Teď přímo na testech — nasazení má čekat
+    # na to, že kód projde, ne na synchronizaci zrcadla.
+    needs: [test, e2e-tests]
     if: github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     steps:
       - uses: actions/checkout@v4

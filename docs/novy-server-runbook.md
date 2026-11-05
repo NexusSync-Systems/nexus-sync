@@ -175,13 +175,25 @@ sudo -u postgres psql -d nexus -c "GRANT ALL ON SCHEMA public TO nexus;"
 
 Proměnnou `DB_HESLO` nechte v tomtéž shellu — použije se v dalším kroku pro `.env`. Pak si ji odložte do správce hesel.
 
-Kód. Nasazení očekává klon **backendového** repozitáře přesně v `/root/nexus-backend` — tam úloha `sync-backend` posílá podsložku `server/`:
+Kód. Nasazení očekává složku `/root/nexus-backend` — **ale neklonujte ji z gitu.**
+
+Od PR #155 doručuje kód rsyncem úloha `deploy-backend` přímo z pipeline
+a server k GitHubu nemá žádný přístup. Je to záměr: na stroji dostupném
+z internetu pak neleží nic, co by šlo zneužít k přístupu do repozitáře.
+
+Stačí tedy adresář založit a nechat ho prázdný:
 
 ```bash
-git clone https://github.com/NexusSync-Systems/nexus-backend.git /root/nexus-backend
-cd /root/nexus-backend
-npm install
+mkdir -p /root/nexus-backend
 ```
+
+První nasazení z CI do něj kód doveze samo, včetně `npm install`
+a instalace cronů údržby. Co běží, se pak čte z `/root/nexus-backend/NASAZENO.txt`.
+
+> Dřív tu stál `git clone` zrcadla `nexus-backend`. To bylo správně, dokud si
+> server kód stahoval sám. Dnes by to zavedlo `.git`, který nasazení stejně
+> smaže — a hlavně by to tvrdilo, že server potřebuje přístup ke GitHubu.
+> Úloha `sync-backend` byla 5. 11. 2026 odstraněna.
 
 ## 4. Soubor `.env`
 
