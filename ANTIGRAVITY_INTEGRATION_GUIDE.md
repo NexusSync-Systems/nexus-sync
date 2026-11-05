@@ -179,6 +179,11 @@ Update `package.json`:
 
 ### Step 4: Webhook Handler for Antigravity Events
 
+> **⚠️ NEDĚLEJTE TENHLE KROK.** Kód níž přijímá `command` z těla požadavku
+> a spouští ho přes shell, a bez nastaveného secretu neověřuje nic. Soubor,
+> který podle něj vznikl, byl 5. 11. 2026 z repozitáře odstraněn — proč,
+> stojí v ANTIGRAVITY_SETUP_GUIDE.md. Text zůstává jako záznam.
+
 Create `scripts/antigravity-webhook.js`:
 
 ```javascript
