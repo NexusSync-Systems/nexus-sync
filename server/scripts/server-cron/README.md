@@ -27,9 +27,14 @@ ukazuje tam, takže se aktualizují s každým nasazením.
 | Soubor | Kdy běží | Co dělá |
 | --- | --- | --- |
 | `udrzuj-instanci.sh` | min. 4 a 34 každou hodinu | 5 min zátěže na jednom vlákně, aby Oracle instanci nezabavil za nečinnost |
-| `instaluj-udrzbu.sh` | z nasazení | idempotentně nastaví `/etc/cron.d/nexus-udrzba` |
+| `zaloha-konfigurace.sh` | 3:41 UTC a při nasazení | šifrovaná kopie `.env`; bez ní je obnovená databáze nečitelná |
+| `instaluj-udrzbu.sh` | z nasazení | idempotentně nastaví oba crony |
 
 Vypínač zátěže: `touch /etc/nexus-udrzba-vypnuto` (nasazení ho nepřepíše).
+
+**Pozor: vypínač se zálohy konfigurace NETÝKÁ.** Proto má vlastní soubor
+`/etc/cron.d/nexus-zaloha-konfigurace` — kdyby bydlela ve stejném cronu jako
+zátěž, vypnutím zátěže by člověk nechtěně vypnul i zálohu klíčů.
 
 Proč to vůbec existuje, měření a co to **neřeší**: `docs/jak-neprijit-o-server.md`.
 

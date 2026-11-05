@@ -34,6 +34,9 @@ KLIC="${ZALOHA_SSH_KEY:-$HOME/.ssh/nexus_hub_ed25519}"
 CIL="${ZALOHA_CIL:-$HOME/Zalohy/nexus-hub}"
 HESLO="${ZALOHA_HESLO_FILE:-$HOME/.nexus-zaloha-heslo}"
 PONECHAT="${ZALOHA_PONECHAT:-7}"
+# Konfigurací se drží víc než dumpů: mění se zřídka, jsou po 1,3 kB a starý
+# ENCRYPTION_KEY může být pořád ten, kterým jsou šifrovaná starší data.
+PONECHAT_KONFIG="${ZALOHA_PONECHAT_KONFIG:-20}"
 VZDALENY_DIR=/var/backups/nexus
 
 # ── Kontrola vstupů PŘED jakýmkoli mazáním ───────────────────────────────────
@@ -48,6 +51,18 @@ esac
 if [ "$PONECHAT" -lt 1 ]; then
   echo "❌ ZALOHA_PONECHAT musí být aspoň 1, dostal jsem $PONECHAT." >&2
   echo "   Nula by smazala i zálohu, kterou tenhle běh právě odvezl." >&2
+  exit 2
+fi
+
+# Totéž pro konfigurace. Nula by tu byla horší než u dumpů: smazala by jedinou
+# kopii ENCRYPTION_KEY, a tedy i možnost přečíst odvezené databáze.
+case "$PONECHAT_KONFIG" in
+  ''|*[!0-9]*)
+    echo "❌ ZALOHA_PONECHAT_KONFIG musí být celé číslo, dostal jsem '$PONECHAT_KONFIG'." >&2
+    exit 2 ;;
+esac
+if [ "$PONECHAT_KONFIG" -lt 1 ]; then
+  echo "❌ ZALOHA_PONECHAT_KONFIG musí být aspoň 1, dostal jsem $PONECHAT_KONFIG." >&2
   exit 2
 fi
 
@@ -74,6 +89,107 @@ uklid() {
 trap uklid EXIT
 
 na_serveru() { ssh -i "$KLIC" -o ConnectTimeout=20 "$SERVER" "sudo bash -c '$1'"; }
+
+# ── Konfigurace serveru ──────────────────────────────────────────────────────
+#
+# .env existuje JEN na serveru a v noční záloze databáze není. ENCRYPTION_KEY
+# v něm je AES klíč, kterým se šifrují profile.credentials — bez něj se obnovená
+# databáze nedá přečíst. Odvézt dumpy bez konfigurace tedy znamená odvézt něco,
+# co po ztrátě serveru nikdo nerozluští.
+#
+# Běží PŘED databází schválně: v části pro databázi jsou dvě větve, které
+# končí dřív (nelze ověřit, archiv už tu je), a konfigurace by se přeskočila.
+#
+# A nikdy nekončí `exit`: záloha databáze je důležitější a problém
+# s konfigurací ji nesmí zablokovat. Jen se nahlas ohlásí.
+odvez_konfiguraci() {
+  local nazev cilovy velikost ocekavany skutecny pocet
+
+  nazev="$(na_serveru 'ls -t '"$VZDALENY_DIR"'/konfigurace_*.env.gpg 2>/dev/null | head -1 | xargs -r -n1 basename')"
+  if [ -z "$nazev" ]; then
+    echo "⚠️  Na serveru není žádná záloha konfigurace."
+    echo "    Čeká se na nasazení nebo noční cron (zaloha-konfigurace.sh)."
+    return 1
+  fi
+
+  cilovy="$CIL/$nazev"
+  if [ -f "$cilovy" ] && [ -f "$cilovy.sha256-obsahu" ]; then
+    echo "✓ Konfigurace $nazev už je odvezená."
+    return 0
+  fi
+
+  STAGING="$CIL/.stahovani-konfig-$$-$nazev"
+  echo "Odvážím konfiguraci $nazev"
+
+  if ! na_serveru "cat $VZDALENY_DIR/$nazev" > "$STAGING"; then
+    echo "⚠️  Přenos konfigurace selhal." >&2
+    rm -f "$STAGING"; STAGING=""
+    return 1
+  fi
+  if ! na_serveru "cat $VZDALENY_DIR/$nazev.sha256-obsahu" > "$STAGING.sha256-obsahu"; then
+    echo "⚠️  Přenos kontrolního součtu konfigurace selhal." >&2
+    rm -f "$STAGING" "$STAGING.sha256-obsahu"; STAGING=""
+    return 1
+  fi
+
+  # Mez je tu nižší než u dumpů: zašifrované .env má kolem 1,3 kB, takže
+  # kontrola na 1024 B by u něj hlásila chybu u zdravého souboru.
+  velikost="$(wc -c < "$STAGING" | tr -d '[:space:]')"
+  if [ "${velikost:-0}" -lt 256 ]; then
+    echo "⚠️  Odvezená konfigurace má jen ${velikost} B — nepublikuji." >&2
+    rm -f "$STAGING" "$STAGING.sha256-obsahu"; STAGING=""
+    return 1
+  fi
+
+  if [ ! -f "$HESLO" ]; then
+    # Nepublikuje se nic neověřeného: konfigurace je to jediné, čím se po
+    # ztrátě serveru dá databáze rozluštit, takže „asi to půjde otevřít" nestačí.
+    echo "⚠️  Konfiguraci NEMOHU ověřit (chybí $HESLO), proto ji nepublikuji."
+    rm -f "$STAGING" "$STAGING.sha256-obsahu"; STAGING=""
+    return 1
+  fi
+
+  ocekavany="$(cut -d' ' -f1 < "$STAGING.sha256-obsahu")"
+  if ! gpg --batch --quiet --pinentry-mode loopback \
+          --passphrase-file "$HESLO" \
+          --decrypt "$STAGING" > "$STAGING.rozsifrovany" 2>/dev/null; then
+    echo "⚠️  Konfiguraci se nepodařilo rozšifrovat — nejčastěji špatné heslo v $HESLO." >&2
+    rm -f "$STAGING" "$STAGING.sha256-obsahu" "$STAGING.rozsifrovany"; STAGING=""
+    return 1
+  fi
+
+  skutecny="$(shasum -a 256 < "$STAGING.rozsifrovany" | cut -d' ' -f1)"
+  # Rozšifrovaný .env se maže hned: obsahuje tajemství v čitelné podobě
+  # a nemá ležet na disku ani o vteřinu déle, než je nutné.
+  rm -f "$STAGING.rozsifrovany"
+  if [ "$ocekavany" != "$skutecny" ]; then
+    echo "⚠️  Konfigurace se rozšifrovala, ale obsah NESOUHLASÍ se serverem." >&2
+    rm -f "$STAGING" "$STAGING.sha256-obsahu"; STAGING=""
+    return 1
+  fi
+
+  mv "$STAGING.sha256-obsahu" "$cilovy.sha256-obsahu"
+  mv "$STAGING" "$cilovy"
+  STAGING=""
+  chmod 600 "$cilovy" "$cilovy.sha256-obsahu"
+  echo "✅ Konfigurace odvezena a ověřena rozšifrováním: $(basename "$cilovy") (${velikost} B)"
+
+  # Konfigurace se mění zřídka, takže archivů je málo a starý klíč může být
+  # pořád ten, kterým jsou šifrovaná starší data. Drží se jich proto víc
+  # a nejnovější se nemaže nikdy.
+  pocet="$(ls -t "$CIL"/konfigurace_*.env.gpg 2>/dev/null | wc -l | tr -d '[:space:]')"
+  if [ "${pocet:-0}" -gt "$PONECHAT_KONFIG" ]; then
+    ls -t "$CIL"/konfigurace_*.env.gpg | tail -n +$((PONECHAT_KONFIG + 1)) | while IFS= read -r stary; do
+      [ "$stary" = "$cilovy" ] && continue
+      rm -f "$stary" "$stary.sha256-obsahu"
+      echo "    promazána stará konfigurace: $(basename "$stary")"
+    done
+  fi
+  return 0
+}
+
+odvez_konfiguraci || echo "⚠️  Konfigurace se neodvezla (viz výše). Pokračuji databází."
+echo
 
 # Glob se musí vyhodnotit AŽ pod rootem — /var/backups/nexus má práva 700,
 # takže pod uživatelem ubuntu se jméno souboru vůbec nezjistí.
