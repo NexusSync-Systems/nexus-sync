@@ -345,6 +345,16 @@ jobs:
 
       # Úmyslně to shodí celý běh: RBAC a relay jsou bezpečnostní testy
       # a neproběhlá kontrola není totéž co kontrola v pořádku.
+      #
+      # PŘEKRYV S HLAVNÍM BĚHEM JE VĚDOMÝ. Od chvíle, kdy hlavní běh pouští
+      # všechny specifikace, je těchhle 47 testů v obou krocích — změřeno,
+      # ne odhadnuto. Zůstává to tak schválně: tenhle krok běží DŘÍV a shodí
+      # běh hned, místo aby se bezpečnostní regrese ukázala až po deseti
+      # minutách mezi ostatními.
+      #
+      # Cena je asi 2–3 minuty navíc. Alternativa by byla vyloučit je
+      # z hlavního běhu — tedy zavést druhý ruční seznam, přesně to, co
+      # tahle změna ruší.
       - name: Run API relay/security tests
         run: npm run test:api
 
