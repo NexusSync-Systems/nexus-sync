@@ -18,7 +18,6 @@
     "test": "npm run test:server && npm run test:client",
     "test:server": "cd server && npm run test",
     "test:client": "cd client && npm run test",
-    "sync:backend": "node scripts/sync-backend.js",
     "version:bump": "node scripts/bump-version.js",
     "security:secrets": "node scripts/check-secrets.js",
     "security:runtime": "cd server && npm run security:runtime",
