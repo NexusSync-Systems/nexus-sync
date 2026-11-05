@@ -104,6 +104,40 @@ Na server **nic nezapisuje**, jen čte.
 Běží a je ověřená — 3:17 UTC, šifrovaná kopie, kontrola věku v 9:05.
 Podrobně `docs/database-backup-restore-runbook.md`.
 
+### Záloha konfigurace
+
+`server/scripts/server-cron/zaloha-konfigurace.sh`, cron 3:41 UTC a při každém
+nasazení.
+
+**Proč to musí být zvlášť:** noční záloha zálohuje PostgreSQL. Konfiguraci ne —
+a ta existuje jen na tom stroji. Zjištěno 5. 11. 2026: v adresáři záloh nebyl
+ani jeden soubor s konfigurací.
+
+Čtyři hodnoty z `.env` nejsou nikde jinde a nasazení je po přestavbě serveru
+nedoplní, protože nejsou v GitHub secretech:
+
+| Klíč | Co znamená jeho ztráta |
+| --- | --- |
+| **`ENCRYPTION_KEY`** | **přístupové údaje profilů v databázi jsou navždy nečitelné** |
+| `SIP_ENCRYPTION_KEY` | totéž pro SIP |
+| `DEVICE_SECRET` | všechny relay telefony se musí spárovat znovu |
+| `JWT_SECRET` | všichni se musí znovu přihlásit |
+
+Ten první je zásadní: `server/src/utils/encryption.js` je AES-256-GCM
+a `profileController.js` jím šifruje `profile.credentials`. **Záloha databáze,
+kterou nejde rozšifrovat, není záloha.**
+
+Šifruje se týmž heslem jako dumpy, schválně — jedno heslo k zapamatování,
+a kdo má odvezené dumpy, má i konfiguraci k nim. Nová kopie vzniká jen při
+změně `.env`, takže v adresáři je vidět, kdy se co změnilo.
+
+**Retence má pojistku:** nejnovější archiv se nemaže nikdy. Bez ní by
+`find -mtime +14 -delete` po dvou týdnech beze změny smazalo jedinou existující
+kopii `ENCRYPTION_KEY`.
+
+Nasazení zároveň srovnává práva `.env` na 600 — 5. 11. 2026 mělo 644, tedy
+čitelné pro kohokoli na stroji včetně `STRIPE_SECRET_KEY`.
+
 ## 3. Co zařízené NENÍ
 
 ### Odvoz zálohy ze serveru je ruční
@@ -179,9 +213,16 @@ Přihlášení heslem je vypnuté, takže útok hrubou silou nemá na co, ale
 
 Postup přestavby je `docs/novy-server-runbook.md`. Pro obnovu dat je potřeba:
 
-1. Odvezený `.gpg` archiv (viz výše — zatím ruční odvoz).
-2. **Heslo k němu** (viz výše — kopie mimo server není potvrzená).
-3. `docs/database-backup-restore-runbook.md`, oddíl o obnově.
+1. Odvezený `.gpg` archiv databáze (viz výše — zatím ruční odvoz).
+2. **Odvezený `konfigurace_*.env.gpg`.** Bez něj se obnovená databáze dá
+   spustit, ale `profile.credentials` z ní nikdo nepřečte — jsou šifrované
+   `ENCRYPTION_KEY`, který je jen v něm.
+3. **Heslo k obojímu** (viz výše — kopie ve správci hesel není potvrzená).
+4. `docs/database-backup-restore-runbook.md`, oddíl o obnově.
+
+Pořadí při obnově: nejdřív rozšifrovat konfiguraci a vrátit `.env` na místo,
+teprve pak obnovovat databázi. Opačně aplikace nastartuje s novým
+`ENCRYPTION_KEY` a zašifrovaná pole začne hlásit jako poškozená.
 
 Obnova je ověřená celá, ne jen vznik souboru: dump se 3. 11. 2026 obnovil do
 dočasné databáze, 50 tabulek a počty řádků odpovídaly produkci.

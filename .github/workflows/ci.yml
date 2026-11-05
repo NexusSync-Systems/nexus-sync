@@ -911,6 +911,24 @@ jobs:
             bash scripts/server-cron/instaluj-udrzbu.sh \
               || echo "::warning::Instalace údržby instance neprošla — instance zůstává kandidátem na zabavení."
 
+            # ── Konfigurace: práva a záloha ────────────────────────────────────
+            #
+            # .env mělo 5. 11. 2026 práva 644, tedy čitelné pro kohokoli na
+            # stroji — včetně STRIPE_SECRET_KEY a JWT_SECRET. Srovnává se to
+            # tady, protože kroky výš do .env zapisují a vytvoří ho s umaskem
+            # přihlašovacího shellu.
+            chmod 600 .env 2>/dev/null || true
+
+            # Záloha konfigurace hned po nasazení, protože .env se mění právě
+            # tady (Stripe klíče a APK token se dopisují ze secretů).
+            #
+            # Noční záloha zálohuje POUZE databázi. ENCRYPTION_KEY, kterým
+            # profileController.js šifruje profile.credentials, nikde jinde
+            # neexistuje — bez něj by se obnovená databáze nedala přečíst.
+            # Záloha, kterou nejde rozšifrovat, není záloha.
+            bash scripts/server-cron/zaloha-konfigurace.sh \
+              || echo "::warning::Záloha konfigurace neprošla — ENCRYPTION_KEY a spol. existují dál jen na tomhle stroji."
+
             # Stahování APK obsluhuje Express z public/downloads (viz app.js),
             # ne nginx, a běží jako root — na právech mu tedy nezáleží. Tyhle
             # chmody jsou pojistka pro případ, že by soubory někdy servíroval
@@ -1025,12 +1043,14 @@ jobs:
         run: |
           shellcheck --version
           shellcheck server/scripts/server-cron/udrzuj-instanci.sh \
-                     server/scripts/server-cron/instaluj-udrzbu.sh
+                     server/scripts/server-cron/instaluj-udrzbu.sh \
+                     server/scripts/server-cron/zaloha-konfigurace.sh \
+                     scripts/odvez-zalohu.sh
 
       - name: Bit x je ve gitu
         run: |
           set -euo pipefail
-          for S in udrzuj-instanci.sh instaluj-udrzbu.sh; do
+          for S in udrzuj-instanci.sh instaluj-udrzbu.sh zaloha-konfigurace.sh; do
             REZIM=$(git ls-files --stage "server/scripts/server-cron/$S" | awk '{print $1}')
             # Bez spustitelného bitu v gitu by rsync na server dovezl soubor,
             # který cron nespustí — a selhávalo by to tiše každou půlhodinu.
@@ -1179,6 +1199,158 @@ jobs:
             exit 1
           fi
           echo "✓ instalátor bez skriptu odmítl pokračovat"
+
+      # ── Záloha konfigurace ──────────────────────────────────────────────────
+      # Tohle je jediná kopie ENCRYPTION_KEY mimo server. Když selže tiše,
+      # zjistí se to až ve chvíli, kdy je obnovená databáze nečitelná.
+      - name: Konfigurace se zašifruje, ověří a neunikne do logu
+        run: |
+          set -euo pipefail
+          # Kontext do logu: chování gpg se mezi verzemi liší a bez tohohle
+          # se u selhání nepozná, jestli jde o skript, nebo o prostředí.
+          gpg --version | head -2
+
+          PRAC=$(mktemp -d)
+          printf 'dostatecne-dlouhe-testovaci-heslo-nad-dvacet-znaku\n' > "$PRAC/heslo"
+          chmod 600 "$PRAC/heslo"
+          printf 'ENCRYPTION_KEY=NEMA_SE_OBJEVIT_V_LOGU_XYZZY\nJWT_SECRET=druhe-tajemstvi\n' > "$PRAC/env"
+
+          # Výstup se zachytává kvůli kontrole, že v něm nejsou tajemství —
+          # jenže při selhání by se pod `set -e` ztratil a v logu by zbyl jen
+          # návratový kód. Proto se při neúspěchu vypíše.
+          if ! VYSTUP=$(NEXUS_ZALOHA_HESLO="$PRAC/heslo" NEXUS_ENV_SOUBOR="$PRAC/env" \
+                        NEXUS_BACKUP_DIR="$PRAC/zalohy" \
+                        bash server/scripts/server-cron/zaloha-konfigurace.sh); then
+            echo "::error::Skript zálohy konfigurace selhal. Co stihl vypsat na stdout:"
+            echo "$VYSTUP"
+            exit 1
+          fi
+          echo "$VYSTUP"
+
+          # 1) Tajemství nesmí být nikde ve výstupu. Skript běží z cronu do
+          #    logu a jeho výstup se objevuje i v logu nasazení, který je
+          #    u veřejného repozitáře čitelný pro kohokoli.
+          if echo "$VYSTUP" | grep -q 'XYZZY'; then
+            echo "::error::Obsah .env se dostal do výstupu skriptu."
+            exit 1
+          fi
+          echo "✓ tajemství ve výstupu není"
+
+          ARCHIV=$(ls "$PRAC/zalohy"/konfigurace_*.env.gpg)
+          echo "✓ vznikl $(basename "$ARCHIV")"
+
+          # 2) Nešifrovaná kopie .env nesmí v adresáři záloh zůstat ležet.
+          if ls "$PRAC/zalohy" | grep -vE '\.gpg$|\.sha256-obsahu$' | grep -q .; then
+            echo "::error::V adresáři záloh je i něco jiného než .gpg a součet:"
+            ls -la "$PRAC/zalohy"
+            exit 1
+          fi
+          echo "✓ nešifrovaná kopie nikde neleží"
+
+          # 3) Archiv musí jít otevřít a dát původní obsah. Zašifrovaný soubor,
+          #    který nikdo nezkusil rozšifrovat, je jen naděje.
+          gpg --batch --quiet --pinentry-mode loopback --passphrase-file "$PRAC/heslo" \
+              --decrypt "$ARCHIV" > "$PRAC/zpet" 2>/dev/null
+          if ! cmp -s "$PRAC/env" "$PRAC/zpet"; then
+            echo "::error::Rozšifrovaný archiv nesouhlasí s původním .env."
+            exit 1
+          fi
+          echo "✓ rozšifrovaný archiv je totožný s originálem"
+
+          # 4) Sidecar musí nést součet originálu — odvoz podle něj ověřuje.
+          OCEKAVANY=$(sha256sum "$PRAC/env" | cut -d' ' -f1)
+          ULOZENY=$(cut -d' ' -f1 < "$ARCHIV.sha256-obsahu")
+          [ "$OCEKAVANY" = "$ULOZENY" ] || {
+            echo "::error::Součet v sidecaru neodpovídá .env."
+            exit 1
+          }
+          echo "✓ kontrolní součet sedí"
+
+      - name: Nezměněná konfigurace nedělá další kopii
+        run: |
+          set -euo pipefail
+          PRAC=$(mktemp -d)
+          printf 'dostatecne-dlouhe-testovaci-heslo-nad-dvacet-znaku\n' > "$PRAC/heslo"
+          printf 'ENCRYPTION_KEY=abc\n' > "$PRAC/env"
+          SPUST() {
+            NEXUS_ZALOHA_HESLO="$PRAC/heslo" NEXUS_ENV_SOUBOR="$PRAC/env" \
+            NEXUS_BACKUP_DIR="$PRAC/zalohy" \
+            bash server/scripts/server-cron/zaloha-konfigurace.sh
+          }
+
+          SPUST > /dev/null
+          DRUHY=$(SPUST)
+          echo "$DRUHY"
+          echo "$DRUHY" | grep -q 'nezměnila' || {
+            echo "::error::Druhý běh nad nezměněnou konfigurací udělal další kopii."
+            exit 1
+          }
+          [ "$(ls "$PRAC/zalohy"/konfigurace_*.env.gpg | wc -l)" = "1" ] || {
+            echo "::error::V adresáři je víc archivů, než má být."
+            exit 1
+          }
+
+          # Po změně naopak kopie vzniknout MUSÍ, jinak by se nová hodnota
+          # ENCRYPTION_KEY nikdy nezazálohovala.
+          sleep 1
+          printf 'ENCRYPTION_KEY=zmeneno\n' > "$PRAC/env"
+          SPUST > /dev/null
+          [ "$(ls "$PRAC/zalohy"/konfigurace_*.env.gpg | wc -l)" = "2" ] || {
+            echo "::error::Po změně .env nevznikla nová kopie."
+            ls -la "$PRAC/zalohy"
+            exit 1
+          }
+          echo "✓ kopie vzniká jen při změně, ale při změně vždy"
+
+      - name: Retence nesmaže jedinou kopii klíče
+        run: |
+          set -euo pipefail
+
+          # Past, kterou tohle hlídá: konfigurace se mění zřídka, takže
+          # `find -mtime +14 -delete` by po dvou týdnech beze změny smazalo
+          # JEDINOU existující kopii ENCRYPTION_KEY — a odvezené databáze by
+          # tím zůstaly navždy nečitelné.
+          PRAC=$(mktemp -d)
+          printf 'dostatecne-dlouhe-testovaci-heslo-nad-dvacet-znaku\n' > "$PRAC/heslo"
+          printf 'ENCRYPTION_KEY=abc\n' > "$PRAC/env"
+          NEXUS_ZALOHA_HESLO="$PRAC/heslo" NEXUS_ENV_SOUBOR="$PRAC/env" \
+            NEXUS_BACKUP_DIR="$PRAC/zalohy" \
+            bash server/scripts/server-cron/zaloha-konfigurace.sh > /dev/null
+
+          ARCHIV=$(ls "$PRAC/zalohy"/konfigurace_*.env.gpg)
+          touch -d '60 days ago' "$ARCHIV" "$ARCHIV.sha256-obsahu"
+
+          NEXUS_ZALOHA_HESLO="$PRAC/heslo" NEXUS_ENV_SOUBOR="$PRAC/env" \
+            NEXUS_BACKUP_DIR="$PRAC/zalohy" NEXUS_KONFIG_RETENCE=14 \
+            bash server/scripts/server-cron/zaloha-konfigurace.sh > /dev/null
+
+          if [ ! -f "$ARCHIV" ]; then
+            echo "::error::Retence smazala jedinou kopii konfigurace."
+            exit 1
+          fi
+          echo "✓ 60 dní stará jediná kopie přežila"
+
+      - name: Prázdná nebo chybějící konfigurace se nevydává za zálohu
+        run: |
+          set -euo pipefail
+          PRAC=$(mktemp -d)
+          printf 'dostatecne-dlouhe-testovaci-heslo-nad-dvacet-znaku\n' > "$PRAC/heslo"
+
+          : > "$PRAC/prazdny"
+          if NEXUS_ZALOHA_HESLO="$PRAC/heslo" NEXUS_ENV_SOUBOR="$PRAC/prazdny" \
+             NEXUS_BACKUP_DIR="$PRAC/zalohy" \
+             bash server/scripts/server-cron/zaloha-konfigurace.sh 2>/dev/null; then
+            echo "::error::Prázdné .env prošlo jako platná záloha."
+            exit 1
+          fi
+
+          if NEXUS_ZALOHA_HESLO="$PRAC/heslo" NEXUS_ENV_SOUBOR="$PRAC/neexistuje" \
+             NEXUS_BACKUP_DIR="$PRAC/zalohy" \
+             bash server/scripts/server-cron/zaloha-konfigurace.sh 2>/dev/null; then
+            echo "::error::Chybějící .env prošlo jako platná záloha."
+            exit 1
+          fi
+          echo "✓ prázdná ani chybějící konfigurace neprojde"
 
   # ── Android Relay field test (post-deploy liveness check) ─────────────────────
   relay-field-test:

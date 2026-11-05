@@ -17,24 +17,29 @@
 set -uo pipefail
 
 CRON=/etc/cron.d/nexus-udrzba
+CRON_KONFIG=/etc/cron.d/nexus-zaloha-konfigurace
 MINUTY="${NEXUS_UDRZBA_MINUTY:-4,34}"
+# Po noční záloze databáze (3:17 UTC), ať jde všechno odvézt jedním během.
+KONFIG_CAS="${NEXUS_KONFIG_CAS:-41 3}"
 
 # Cesta se bere z místa, odkud skript běží, ne natvrdo. Kdyby se layout
 # na serveru změnil, cron bude pořád ukazovat na správný soubor.
 KDE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKRIPT="$KDE/udrzuj-instanci.sh"
+SKRIPT_KONFIG="$KDE/zaloha-konfigurace.sh"
 
-if [ ! -f "$SKRIPT" ]; then
-  echo "❌ Nenašel jsem $SKRIPT — cron neinstaluji."
-  echo "   Cron ukazující na neexistující soubor by selhával každou půlhodinu."
-  exit 1
-fi
-
-# Bit x nese git a rsync ho zachová, ale kdyby ne, cron by jen tiše selhával.
-if [ ! -x "$SKRIPT" ]; then
-  chmod +x "$SKRIPT" || { echo "❌ $SKRIPT není spustitelný a chmod neprošel."; exit 1; }
-  echo "   (doplnil jsem bit x na $SKRIPT)"
-fi
+for S in "$SKRIPT" "$SKRIPT_KONFIG"; do
+  if [ ! -f "$S" ]; then
+    echo "❌ Nenašel jsem $S — cron neinstaluji."
+    echo "   Cron ukazující na neexistující soubor by selhával pořád dokola."
+    exit 1
+  fi
+  # Bit x nese git a rsync ho zachová, ale kdyby ne, cron by jen tiše selhával.
+  if [ ! -x "$S" ]; then
+    chmod +x "$S" || { echo "❌ $S není spustitelný a chmod neprošel."; exit 1; }
+    echo "   (doplnil jsem bit x na $S)"
+  fi
+done
 
 # /etc/cron.d vyžaduje uživatele v šestém poli, mód 644 a vlastníka root.
 # Soubor nesmí mít v názvu tečku, jinak ho cron ignoruje — proto "nexus-udrzba".
@@ -51,6 +56,27 @@ else
   chmod 644 "$CRON"
   chown root:root "$CRON" 2>/dev/null || true
   echo "✓ Nastaven cron údržby instance: $CRON (minuty $MINUTY)"
+fi
+
+# ── Záloha konfigurace ────────────────────────────────────────────────────
+#
+# Schválně SAMOSTATNÝ soubor, ne další řádek v nexus-udrzba. Ten má vypínač
+# /etc/nexus-udrzba-vypnuto a kdyby tam zálohování konfigurace bydlelo taky,
+# vypnutím zátěže by člověk nechtěně vypnul i zálohy.
+OBSAH_KONFIG="# Spravuje nasazení z CI: server/scripts/server-cron/instaluj-udrzbu.sh
+# Ruční změny tady PŘEPÍŠE příští nasazení.
+# POZOR: tohle NENÍ pokryté vypínačem /etc/nexus-udrzba-vypnuto. Je to záloha.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+$KONFIG_CAS * * * root $SKRIPT_KONFIG"
+
+if [ -f "$CRON_KONFIG" ] && [ "$(cat "$CRON_KONFIG")" = "$OBSAH_KONFIG" ]; then
+  echo "✓ Cron zálohy konfigurace je už nastavený, nemění se."
+else
+  printf '%s\n' "$OBSAH_KONFIG" > "$CRON_KONFIG" || { echo "❌ Nelze zapsat $CRON_KONFIG"; exit 1; }
+  chmod 644 "$CRON_KONFIG"
+  chown root:root "$CRON_KONFIG" 2>/dev/null || true
+  echo "✓ Nastaven cron zálohy konfigurace: $CRON_KONFIG ($KONFIG_CAS)"
 fi
 
 # Cron, který neběží, by znamenal, že zátěž nikdy nevznikne a instance zůstane

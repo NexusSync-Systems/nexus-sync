@@ -154,8 +154,45 @@ jobs:
             fi
             # Šifrovaná kopie je to jediné, co má smysl odvážet ze stroje.
             # Dump bez .gpg znamená, že šifrovací krok selhal.
-            if ! ls /var/backups/nexus/*.gpg >/dev/null 2>&1; then
+            #
+            # Vzor je úzký schválně: `*.gpg` by od 5. 11. 2026 chytalo i
+            # konfigurace_*.env.gpg, takže by kontrola prošla i ve chvíli,
+            # kdy žádný zašifrovaný DUMP neexistuje.
+            if ! ls /var/backups/nexus/nexus_*.dump.gpg >/dev/null 2>&1; then
               chyba "existuje dump, ale ŽÁDNÁ šifrovaná kopie — odvézt ze serveru není co"
+            fi
+          fi
+
+          # ── záloha konfigurace ──
+          #
+          # .env existuje jen na tomhle stroji a v záloze databáze není.
+          # ENCRYPTION_KEY v něm šifruje profile.credentials, takže bez něj
+          # je obnovená databáze nečitelná.
+          #
+          # NEKONTROLUJE SE STÁŘÍ: zaloha-konfigurace.sh novou kopii nedělá,
+          # když se .env nezměnilo, takže měsíc starý archiv je v pořádku.
+          # Smysl dává jen to, jestli záloha odpovídá SKUTEČNÉMU .env.
+          KONFIG=$(ls -t /var/backups/nexus/konfigurace_*.env.gpg 2>/dev/null | head -1)
+          if [ -z "$KONFIG" ]; then
+            chyba "neexistuje ŽÁDNÁ záloha konfigurace — ENCRYPTION_KEY je jen na tomhle stroji"
+          elif [ ! -f /root/nexus-backend/.env ]; then
+            chyba "/root/nexus-backend/.env neexistuje — aplikace běží bez konfigurace?"
+          else
+            TED=$(sha256sum /root/nexus-backend/.env | cut -d' ' -f1)
+            ZALOHA=$(cut -d' ' -f1 < "$KONFIG.sha256-obsahu" 2>/dev/null)
+            if [ "$TED" = "$ZALOHA" ]; then
+              echo "✓ záloha konfigurace odpovídá aktuálnímu .env"
+            else
+              chyba "záloha konfigurace NEODPOVÍDÁ aktuálnímu .env — od poslední zálohy se změnilo a nová nevznikla"
+            fi
+          fi
+
+          # .env čitelné pro všechny na stroji. Nasazení to od 5. 11. 2026
+          # srovnává na 600; kdyby to někdo vrátil, ať se to pozná.
+          if [ -f /root/nexus-backend/.env ]; then
+            REZIM=$(stat -c %a /root/nexus-backend/.env)
+            if [ "$REZIM" != "600" ]; then
+              varuj ".env má práva $REZIM místo 600 — obsahuje STRIPE_SECRET_KEY a JWT_SECRET"
             fi
           fi
 
