@@ -65,13 +65,30 @@ CIL="$BACKUP_DIR/konfigurace_$(date -u +%Y%m%dT%H%M%SZ).env.gpg"
 # Heslo NIKDY argumentem — argumenty vidí v `ps` všichni uživatelé stroje.
 # A šifruje se rovnou ze zdroje: nešifrovaná kopie .env nesmí v adresáři
 # záloh vzniknout ani na okamžik.
-gpg --batch --yes --quiet \
-    --passphrase-file "$HESLO" \
-    --symmetric --cipher-algo AES256 \
-    --output "$CIL" "$ZDROJ"
+#
+# `--pinentry-mode loopback` je tu nutnost, ne ozdoba: GnuPG 2.1+ se i při
+# zadaném --passphrase-file obrací na agenta, a v dávkovém běhu (cron,
+# nasazení, čerstvý stroj) nemá agent koho se zeptat. Skončí kódem 2, často
+# bez jediného řádku na výstupu. Ověřeno 5. 11. 2026 v CI, kde přesně takhle
+# spadla celá úloha.
+#
+# Na současném serveru to projde i bez toho, protože tam je agent nastavený.
+# Spoléhat na to ale nejde — po přestavbě stroje by záloha klíčů tiše
+# přestala vznikat, tedy přesně ve chvíli, kdy je potřeba nejvíc.
+if ! gpg --batch --yes --quiet \
+         --pinentry-mode loopback \
+         --passphrase-file "$HESLO" \
+         --symmetric --cipher-algo AES256 \
+         --output "$CIL" "$ZDROJ"; then
+  echo "❌ Zašifrování konfigurace selhalo (gpg)." >&2
+  rm -f "$CIL"
+  exit 1
+fi
 
 # Zašifrovaný soubor, který nikdo nezkusil otevřít, je jen naděje.
-ROZSIFROVANY="$(gpg --batch --quiet --passphrase-file "$HESLO" --decrypt "$CIL" 2>/dev/null | sha256sum | cut -d' ' -f1)"
+ROZSIFROVANY="$(gpg --batch --quiet --pinentry-mode loopback \
+                    --passphrase-file "$HESLO" --decrypt "$CIL" 2>/dev/null \
+                | sha256sum | cut -d' ' -f1)"
 if [ "$SOUCET" != "$ROZSIFROVANY" ]; then
   echo "❌ Rozšifrovaný archiv nesouhlasí s konfigurací — mažu ho" >&2
   rm -f "$CIL"
