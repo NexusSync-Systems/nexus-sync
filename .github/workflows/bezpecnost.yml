@@ -1,0 +1,209 @@
+name: Bezpečnostní kontrola
+
+# Nezávislá na placených doplňcích GitHubu a na cizích aplikacích.
+#
+# PROČ TAKHLE: alternativou byly nativní funkce GitHubu (CodeQL, Dependabot)
+# nebo aplikace z marketplace. Obojí má háček:
+#
+#   - CodeQL a secret scanning jsou u SOUKROMÝCH repozitářů placené doplňky
+#     účtované za každého, kdo pushuje. A o viditelnosti tohohle repozitáře
+#     se teprve rozhoduje, viz docs/jak-neprijit-o-server.md.
+#   - Aplikace z marketplace (CodeRabbit a spol.) jsou skutečné pluginy:
+#     cizí firma dostane oprávnění číst repozitář. U kódu s licencí
+#     „PROPRIETARY — All Rights Reserved" je to rozhodnutí jiné váhy.
+#
+# Tohle běží celé ve vlastním CI. Nikdo zvenčí nedostává přístup ke kódu,
+# stojí to stejně nic u veřejného i soukromého repozitáře a při odchodu
+# z GitHubu to jde s vámi — na rozdíl od nativních funkcí.
+#
+# POZOR, CO TO NENAHRAZUJE:
+#   - `semgrep` s otevřenými pravidly NENÍ rovnocenná náhrada CodeQL.
+#     Najde dost, ale hlubokou analýzu toku dat nedělá stejně dobře.
+#   - Blokování pushe s tajemstvím nahradit nejde vůbec. To musí vynutit
+#     GitHub na své straně, protože se to děje dřív, než cokoli dorazí do CI.
+#     Tahle kontrola tajemství najde, ale až když už je v historii — a odtud
+#     se nemaže.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bezpecnost-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kontrola:
+    name: Bezpečnostní kontrola
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Celá historie je nutná: gitleaks prohledává commity, ne jen
+          # pracovní strom. Právě tím doplňuje scripts/check-secrets.js,
+          # který se dívá jen na soubory, jak vypadají teď.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Vlastní Python, ne systémový. Systémový je na dnešních obrazech Ubuntu
+      # chráněný (PEP 668) a `pip install` do něj skončí chybou
+      # „externally-managed-environment".
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # ── 1. Zranitelné závislosti ────────────────────────────────────────
+      #
+      # Zvlášť nad každým package-lock.json. Stromy závislostí jsou oddělené,
+      # jeden společný výsledek neexistuje. `npm audit` čte zámkový soubor,
+      # takže nic není potřeba instalovat.
+      - name: Zranitelné závislosti
+        continue-on-error: true
+        run: |
+          mkdir -p vysledky/audit
+          for KDE in . server client local-agent; do
+            [ -f "$KDE/package-lock.json" ] || continue
+            NAZEV=$([ "$KDE" = "." ] && echo "root" || basename "$KDE")
+            echo "── $NAZEV ──"
+            # `|| true`: npm audit vrací nenulu, když něco najde. To je
+            # očekávaný stav, ne chyba běhu — o tom, co je ještě přijatelné,
+            # rozhoduje souhrn níž, ne návratový kód nástroje.
+            (cd "$KDE" && npm audit --json 2>/dev/null) > "vysledky/audit/$NAZEV.json" || true
+            # Prázdný soubor by souhrn označil jako „nedoběhlo", což je
+            # správně: znamenalo by to, že audit vůbec nic nevypsal.
+            if [ ! -s "vysledky/audit/$NAZEV.json" ]; then
+              echo "::warning::npm audit pro $NAZEV nevypsal nic."
+            fi
+          done
+
+      # ── 2. Tajemství v historii ─────────────────────────────────────────
+      - name: Tajemství v historii gitu
+        continue-on-error: true
+        env:
+          # Pevná verze: nástroj, který se sám aktualizuje, mění výsledky
+          # mezi běhy a pak není poznat, jestli přibyl nález, nebo pravidlo.
+          GITLEAKS_VERZE: '8.18.4'
+        run: |
+          set -uo pipefail
+          mkdir -p vysledky
+          curl -sSfL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERZE}/gitleaks_${GITLEAKS_VERZE}_linux_x64.tar.gz" \
+            || { echo "::warning::Gitleaks se nepodařilo stáhnout."; exit 0; }
+          tar -xzf gitleaks.tar.gz gitleaks || { echo "::warning::Archiv gitleaks nejde rozbalit."; exit 0; }
+
+          # ── Proč to není prostě „prohledej celou historii" ──────────────
+          #
+          # První pokus tohle dělal a RUNNERU DOŠLA PAMĚŤ — běh byl zabit po
+          # 3 minutách 51 vteřinách, ne vyčerpáním časového limitu.
+          #
+          # Důvod: v historii tohohle repozitáře leží commitnutá npm cache.
+          # `git count-objects` hlásí 345 MB a mezi největšími objekty jsou
+          # balíky po 64, 41 a 36 MB plus 34MB client/lint_results.txt.
+          # Gitleaks je zkoušel dekódovat všechny.
+          #
+          # `--max-target-megabytes 5` proto velké soubory přeskakuje. Tajemství
+          # se do šedesátimegabajtového archivu balíčku nepíšou.
+          #
+          # A historie se znovu neprohledává při každém PR. Staré commity se
+          # nemění, takže opakovaný průchod 1 409 commity je jen placený čas:
+          #
+          #   - v PR   → jen pracovní strom (--no-git), rychlé a ohraničené
+          #   - master → celá historie, kde na to je prostor
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            ROZSAH="--no-git"
+            echo "Režim: jen pracovní strom (PR)."
+          else
+            ROZSAH=""
+            echo "Režim: celá historie (master)."
+          fi
+
+          # `--redact` je POVINNÉ, ne volitelné: logy běhů veřejného
+          # repozitáře vidí kdokoli. Bez toho by nástroj na hledání tajemství
+          # sám tajemství zveřejnil.
+          #
+          # `--exit-code 0`: o tom, jestli běh spadne, rozhoduje workflow,
+          # ne nástroj.
+          # shellcheck disable=SC2086
+          ./gitleaks detect \
+            --source . \
+            $ROZSAH \
+            --max-target-megabytes 5 \
+            --redact \
+            --report-format json \
+            --report-path vysledky/gitleaks.json \
+            --exit-code 0 || echo "::warning::Gitleaks skončil chybou."
+
+      # ── 3. Statická analýza ─────────────────────────────────────────────
+      - name: Statická analýza kódu
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          mkdir -p vysledky
+          python3 -m pip install --quiet semgrep \
+            || { echo "::warning::Semgrep se nepodařilo nainstalovat."; exit 0; }
+
+          # `--metrics=off`: bez toho posílá semgrep telemetrii o repozitáři
+          # na své servery. Celý smysl téhle úlohy je, že nic neodchází.
+          #
+          # Pravidla jsou pojmenovaná výslovně, ne `--config=auto`. Auto
+          # posílá metadata repozitáře, aby si vybralo samo.
+          semgrep scan \
+            --config p/javascript \
+            --config p/security-audit \
+            --metrics=off \
+            --json --output vysledky/semgrep.json \
+            --quiet || echo "::warning::Semgrep skončil chybou."
+
+      # ── Souhrn ──────────────────────────────────────────────────────────
+      #
+      # Rozlišuje „nic jsem nenašel" od „nástroj vůbec neběžel". Chybějící
+      # report hlásí jako chybu, ne jako čistý výsledek — nástroj, který se
+      # tiše nespustil, by jinak vypadal jako dobrá zpráva.
+      - name: Souhrn do shrnutí úlohy
+        if: always()
+        continue-on-error: true
+        run: |
+          node scripts/souhrn-bezpecnosti.js \
+            vysledky/audit \
+            vysledky/gitleaks.json \
+            vysledky/semgrep.json >> "$GITHUB_STEP_SUMMARY"
+
+      # Podrobnosti k nálezům. Hodnoty tajemství jsou díky `--redact`
+      # začerněné i tady.
+      # `if-no-files-found: warn` a `continue-on-error`: kdyby ani jedna
+      # kontrola nic nevyprodukovala, nahrávání artefaktu by samo shodilo
+      # úlohu — a v souhrnu by přitom stálo srozumitelné „nedoběhlo".
+      # Diagnostika má být ve shrnutí, ne v pádu kroku, který jen ukládá.
+      - name: Uložit podrobné výsledky
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: bezpecnostni-kontrola
+          path: vysledky/
+          if-no-files-found: warn
+          retention-days: 14
+
+      # ── Zatím NEBLOKUJE, a je to záměr ──────────────────────────────────
+      #
+      # Tyhle tři nástroje nad tímhle repozitářem nikdy neběžely, takže první
+      # běhy skoro jistě něco najdou — včetně plané poplachy. Kdyby to hned
+      # shazovalo PR, skončí to jedním ze dvou způsobů: buď se kontrola vypne,
+      # nebo se na červenou přestane koukat. Obojí je horší než dnešek.
+      #
+      # Stejný postup jako u měření testů: nejdřív změřit, pak podle naměřeného
+      # nastavit mez. Až bude výchozí stav známý a uklizený, tenhle krok se
+      # změní na skutečnou bránu.
+      - name: Verdikt
+        if: always()
+        run: |
+          echo "Kontrola proběhla. Výsledky jsou ve shrnutí úlohy a v artefaktu."
+          echo "Tahle úloha zatím běh ZÁMĚRNĚ neshazuje — viz komentář ve workflow."
