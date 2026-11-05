@@ -337,8 +337,11 @@ jobs:
 
       # Bez tohohle bylo u zčervenalé úlohy vidět jen její jméno a co přesně
       # padlo se zjišťovalo projetím logu. Viz docs/audit-testu-a-ci.md, nález 4.
+      # `continue-on-error`: krok, který jen vypisuje, nemá nikdy shodit běh,
+      # kterému testy prošly.
       - name: Souhrn E2E do shrnutí úlohy
         if: always()
+        continue-on-error: true
         run: |
           node scripts/shrnuti-testu.js \
             test-results/playwright-results.json \
@@ -365,16 +368,28 @@ jobs:
         continue-on-error: true
         env:
           FRONTEND_URL: ${{ secrets.FRONTEND_URL || 'https://nexus-sync-8d50b.web.app' }}
-          # Jiný soubor, ať se nepřepíše report z běhu výš.
-          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/mereni-vse.json
         run: |
+          # Reportér i výstupní adresář se přepisují na příkazové řádce, ne
+          # proměnnou prostředí. `playwright.config.js` má u json reportéru
+          # pevné `outputFile: test-results/playwright-results.json`, které má
+          # před PLAYWRIGHT_JSON_OUTPUT_NAME přednost — měření by tedy přepsalo
+          # report hlavního běhu, a to ještě PŘED tím, než se nahraje jako
+          # artefakt. V artefaktu by pak byly výsledky měření místo toho, co
+          # se po spadlém testu hledá.
+          #
+          # `--reporter=json` z příkazové řádky nahradí reportéry z konfigurace
+          # celé, takže JSON jde na stdout a odsud do vlastního souboru.
+          # `--output` odděluje i trasy a snímky.
+          #
           # `--retries=0` schválně: zajímá mě, co projde napoprvé. Opakování
           # by nestabilní testy schovalo mezi zelené, a to je přesně ten údaj,
           # kvůli kterému se to měří.
-          npx playwright test --project=chromium --retries=0 || true
+          npx playwright test --project=chromium --retries=0 \
+            --reporter=json --output=test-results-mereni \
+            > mereni-vse.json 2>/dev/null || true
 
           node scripts/shrnuti-testu.js \
-            test-results/mereni-vse.json \
+            mereni-vse.json \
             "Měření: všechny E2E testy včetně těch, které CI nespouští" >> "$GITHUB_STEP_SUMMARY"
 
       # Jediná věc, kterou měl zrušený workflow „QA: E2E Testing Suite" a tenhle

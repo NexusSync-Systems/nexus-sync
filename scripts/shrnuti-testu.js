@@ -45,14 +45,19 @@ const projdi = (suites, cestaSouboru) => {
     const soubor = s.file || cestaSouboru;
     for (const spec of s.specs || []) {
       for (const test of spec.tests || []) {
-        const posledni = (test.results || [])[test.results.length - 1] || {};
+        // `results` se musí vytáhnout do proměnné. Zápis
+        // `(test.results || [])[test.results.length - 1]` vypadá bezpečně,
+        // ale `test.results.length` se vyhodnotí DŘÍV než pojistka `|| []`,
+        // takže nad chybějícím polem spadne na TypeError — a shodilo by to
+        // celý krok, i když testy prošly.
+        const vysledky = Array.isArray(test.results) ? test.results : [];
+        const posledni = vysledky[vysledky.length - 1] || {};
         testy.push({
           soubor,
           nazev: spec.title,
           projekt: test.projectName || '',
           stav: posledni.status || 'neznámý',
-          ocekavano: test.expectedStatus || 'passed',
-          pokusu: (test.results || []).length,
+          pokusu: vysledky.length,
           chyba: (posledni.error && (posledni.error.message || '')) || '',
         });
       }
