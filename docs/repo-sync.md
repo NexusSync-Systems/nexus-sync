@@ -1,5 +1,22 @@
 # Repo sync — monorepo ↔ produkční backend
 
+> ## ⚠️ PŘEKONÁNO 5. 11. 2026 — tohle už neplatí
+>
+> Celý postup níž popisuje stav, kdy si server stahoval kód ze zrcadla
+> `nexus-backend`. **Od PR #155 ho doručuje rsync** přímo z úlohy
+> `deploy-backend` a na serveru `.git` vůbec není.
+>
+> Úloha `sync-backend`, která do zrcadla tlačila, byla odstraněna. Důvod
+> nebyl jen ten, že přestala být potřeba: zrcadlo má vlastní `deploy.yml`,
+> který na serveru dělá `git reset --hard` a `git pull`, a každý push ho
+> spouštěl. Selhával pokaždé, protože jeho secrety jsou z března 2026 od
+> smazaného VPS — jen 5. 11. 2026 tak vzniklo několik červených běhů za sebou.
+>
+> **Aktuální postup nasazení:** `.github/workflows/ci.yml`, úloha
+> `deploy-backend`. Přestavba serveru: `docs/novy-server-runbook.md`.
+>
+> Text níž zůstává jako záznam, jak to fungovalo dřív. Nepoužívat jako návod.
+
 ## Dvě repa
 - **`origin` = `NexusSync-Systems/nexus-sync`** — celý **monorepo** (client + server + android). **Zdroj pravdy.**
 - **`live` = `NexusSync-Systems/nexus-backend`** — jen složka **`server/`** projektovaná do rootu. Běží na produkci; **push do `master` = deploy** (přes `.github/workflows/deploy.yml` → SSH na VPS → `prisma db push` + pm2 restart).
