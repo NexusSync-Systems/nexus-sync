@@ -51,8 +51,14 @@ SOUCET="$(sha256sum "$ZDROJ" | cut -d' ' -f1)"
 # SC2012 (`find` místo `ls`) se tu nehodí: jde o řazení podle času a jména si
 # tenhle skript generuje sám ve tvaru konfigurace_<ISO8601>.env.gpg, takže
 # mezery ani jiné záludnosti v nich být nemůžou.
+#
+# `|| true` tu NENÍ kosmetika. Při prvním běhu je adresář prázdný, glob se
+# nerozvine, `ls` skončí nenulově — a protože je zapnutý `pipefail`, propustí
+# to `set -e`, který skript zabije. Mlčky, protože stderr jde do /dev/null.
+# Záloha konfigurace by tedy nikdy nevznikla a v logu by po ní nezbylo nic.
+# Vyzkoušeno, ne odhadnuto.
 # shellcheck disable=SC2012
-NEJNOVEJSI="$(ls -t "$BACKUP_DIR"/konfigurace_*.env.gpg 2>/dev/null | head -1)"
+NEJNOVEJSI="$(ls -t "$BACKUP_DIR"/konfigurace_*.env.gpg 2>/dev/null | head -1 || true)"
 if [ -n "$NEJNOVEJSI" ] && [ -f "$NEJNOVEJSI.sha256-obsahu" ]; then
   if [ "$(cut -d' ' -f1 < "$NEJNOVEJSI.sha256-obsahu")" = "$SOUCET" ]; then
     echo "✓ Konfigurace se od poslední zálohy nezměnila, novou nedělám: $(basename "$NEJNOVEJSI")"
