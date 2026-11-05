@@ -35,7 +35,34 @@ s chybějící šablonou poradí a použije zapsaná výchozí oprávnění
 (`defaultPerms`). Vytvoří agenturu, k ní roli `Agency Admin` a jejího prvního
 uživatele. Další role by se musely zakládat zvlášť.
 
-## Postup
+## Nejkratší cesta: jeden skript
+
+`scripts/nachystej-testovaci-agenturu.js` udělá celý postup níž najednou —
+agenturu, operátorské účty, profily i jejich přiřazení.
+
+```bash
+(umask 077; printf '%s\n' 'TvojeHeslo1' > ~/.nexus-test-admin-heslo)
+```
+
+```bash
+node scripts/nachystej-testovaci-agenturu.js --ano
+```
+
+Bez přepínače `--ano` jen vypíše, co by udělal, a skončí. Heslo se bere ze
+souboru, takže se neobjeví v historii příkazů ani ve výpisu procesů; hesla
+operátorek se vygenerují a uloží do `~/nexus-testovaci-ucty.txt` s právy 600,
+ne na obrazovku.
+
+Dá se pustit znovu — když agentura s tím e-mailem existuje, registrace se
+přeskočí a doplní se zbytek.
+
+**Spouští to člověk.** Zakládání účtů na ostrém serveru je rozhodnutí někoho,
+kdo za ten server odpovídá.
+
+Zbytek téhle stránky popisuje tytéž kroky ručně, pro případ, že by bylo potřeba
+udělat jen některý z nich.
+
+## Postup ručně
 
 ### 1. Založení agentury
 
