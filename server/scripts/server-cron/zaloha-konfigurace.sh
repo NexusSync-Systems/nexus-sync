@@ -47,6 +47,11 @@ SOUCET="$(sha256sum "$ZDROJ" | cut -d' ' -f1)"
 
 # Konfigurace se mění zřídka. Bez tohohle by tu po roce leželo 365 totožných
 # archivů a v tom se nedá poznat, KDY se co změnilo.
+#
+# SC2012 (`find` místo `ls`) se tu nehodí: jde o řazení podle času a jména si
+# tenhle skript generuje sám ve tvaru konfigurace_<ISO8601>.env.gpg, takže
+# mezery ani jiné záludnosti v nich být nemůžou.
+# shellcheck disable=SC2012
 NEJNOVEJSI="$(ls -t "$BACKUP_DIR"/konfigurace_*.env.gpg 2>/dev/null | head -1)"
 if [ -n "$NEJNOVEJSI" ] && [ -f "$NEJNOVEJSI.sha256-obsahu" ]; then
   if [ "$(cut -d' ' -f1 < "$NEJNOVEJSI.sha256-obsahu")" = "$SOUCET" ]; then

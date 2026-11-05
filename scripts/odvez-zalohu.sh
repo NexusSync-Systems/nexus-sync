@@ -177,8 +177,15 @@ odvez_konfiguraci() {
   # Konfigurace se mění zřídka, takže archivů je málo a starý klíč může být
   # pořád ten, kterým jsou šifrovaná starší data. Drží se jich proto víc
   # a nejnovější se nemaže nikdy.
+  # SC2012 se tu zamítá vědomě, na všech čtyřech místech v tomhle souboru:
+  # jde o řazení podle ČASU, které `find` sám neumí, a náhrada přes
+  # `find -printf '%T@ %p'` je jen GNU — tenhle skript ale běží na macOS,
+  # takže by ho ta „oprava" rozbila přesně tam, kde se používá.
+  # Jména souborů navíc generuje server ve tvaru <prefix>_<ISO8601>.<pripona>.
+  # shellcheck disable=SC2012
   pocet="$(ls -t "$CIL"/konfigurace_*.env.gpg 2>/dev/null | wc -l | tr -d '[:space:]')"
   if [ "${pocet:-0}" -gt "$PONECHAT_KONFIG" ]; then
+    # shellcheck disable=SC2012
     ls -t "$CIL"/konfigurace_*.env.gpg | tail -n +$((PONECHAT_KONFIG + 1)) | while IFS= read -r stary; do
       [ "$stary" = "$cilovy" ] && continue
       rm -f "$stary" "$stary.sha256-obsahu"
@@ -285,8 +292,10 @@ fi
 # souboru, a kdyby měl jiný archiv čas v budoucnosti (posunuté hodiny, kopie se
 # zachovanými časy), propadl by ten nový na konec seznamu a smazal by se — tedy
 # „odvezeno a ověřeno" a hned nato prázdno. Vyzkoušeno, ne odhadnuto.
+# shellcheck disable=SC2012  # viz odůvodnění výš u konfigurací
 POCET="$(ls -t "$CIL"/nexus_*.dump.gpg 2>/dev/null | wc -l | tr -d '[:space:]')"
 if [ "${POCET:-0}" -gt "$PONECHAT" ]; then
+  # shellcheck disable=SC2012
   ls -t "$CIL"/nexus_*.dump.gpg | tail -n +$((PONECHAT + 1)) | while IFS= read -r stary; do
     if [ "$stary" = "$CILOVY" ]; then
       echo "    ponechávám právě odvezený: $(basename "$stary")"
