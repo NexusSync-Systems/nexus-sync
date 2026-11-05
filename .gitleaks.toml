@@ -1,10 +1,16 @@
 # Výjimky pro gitleaks.
 #
-# PROČ EXISTUJE: první běh nad historií našel 19 nálezů a 17 z nich byly plané
-# poplachy. Dokud je kontrola nemá vyloučené, nedá se zapnout jako blokující —
-# a kontrola, která je červená pořád, je kontrola, na kterou se za týden
-# přestane koukat. Tenhle soubor je tedy podmínka toho, aby hlídání tajemství
-# něco znamenalo.
+# PROČ EXISTUJE: bez vyloučených planých poplachů se kontrola nedá zapnout jako
+# blokující — a kontrola, která je červená pořád, je kontrola, na kterou se za
+# týden přestane koukat. Tenhle soubor je tedy podmínka toho, aby hlídání
+# tajemství něco znamenalo.
+#
+# TENHLE SOUBOR ŘEŠÍ PRACOVNÍ STROM (režim PR, `--no-git`): 19 nálezů, z toho
+# 15 testovacích přípravků, 2 zahazovací hodnoty CI a 2 klíče Firebase.
+#
+# HISTORII řeší `.gitleaksignore` vedle, a to po jednotlivých nálezech. Těch je
+# 12 a jsou to jiné nálezy než těchhle 19 — první odhad je zaměňoval, protože
+# vznikl nad pracovním stromem, zatímco master prochází celou historii.
 #
 # PRAVIDLO PRO ÚPRAVY: výjimka se přidává na konkrétní cestu nebo konkrétní
 # vzorek, nikdy na celý adresář „pro jistotu". Každá musí mít napsané, proč
@@ -41,12 +47,17 @@ paths = [
 ]
 
 regexes = [
-  # Zahazovací hodnoty pro efemérní databázi v CI. Nalezeno 2 z 19, obě
-  # v .github/workflows/ci.yml: `ci-e2e-jwt-secret-nejmene-32-znaku-dlouhy`
-  # a `ci-e2e-encryption-key-nejmene-32-znaku`.
+  # Zahazovací hodnoty pro efemérní databázi v CI, obě
+  # v .github/workflows/ci.yml.
   #
   # Schválně vzorek, ne cesta: kdyby se do toho souboru někdy dostalo
   # SKUTEČNÉ tajemství, musí ho kontrola pořád najít. Vyloučení celého
   # ci.yml by tuhle možnost zavřelo.
-  '''ci-e2e-[a-z0-9-]+''',
+  #
+  # A schválně UKOTVENÝ a úplný, ne `ci-e2e-[a-z0-9-]+`. Ten by byl
+  # celorepozitářový vzorek na hodnotu nálezu, takže by stačilo pojmenovat
+  # skutečné tajemství předponou `ci-e2e-` a bylo by navždy tiše skryté.
+  # Tady jsou vypsané přesně ty dvě hodnoty, které existují.
+  '''^ci-e2e-jwt-secret-nejmene-32-znaku-dlouhy$''',
+  '''^ci-e2e-encryption-key-nejmene-32-znaku$''',
 ]

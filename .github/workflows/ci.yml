@@ -188,7 +188,12 @@ jobs:
     # a úloha, která se na něčem zasekne, drží runner celé odpoledne, místo
     # aby řekla, že něco není v pořádku. (Stalo se to 4. 8. 2026, kdy testy
     # ještě mířily na produkční API a to přestalo odpovídat.)
-    timeout-minutes: 25
+    #
+    # Při `plne_mereni` je limit vyšší: plná matice přes čtyři prohlížeče nad
+    # 172 testy se do 25 minut nevejde. Limit ÚLOHY ji zruší a `continue-on-error`
+    # na kroku proti tomu nechrání — výsledkem by byla zabitá úloha, nespuštěný
+    # souhrn a ŽÁDNÉ měření, tedy přesný opak záměru.
+    timeout-minutes: ${{ (github.event_name == 'workflow_dispatch' && inputs.plne_mereni) && 90 || 25 }}
 
     # Backend si zvedáme vlastní, zahazovací.
     #
@@ -410,7 +415,13 @@ jobs:
           # nechytilo.
           #
           # Plné měření se proto pouští ručně přes „Run workflow" s volbou
-          # `plne_mereni`, mimo běžné nasazování.
+          # `plne_mereni`.
+          #
+          # SPOUŠTĚJ HO Z VĚTVE, NE Z MASTERU. Nasazovací úlohy mají
+          # v podmínce `github.ref == 'refs/heads/master'` spolu s
+          # `workflow_dispatch`, takže dispatch z masteru by nasazení spustil
+          # a čekal by na tuhle úlohu — tedy hodina zdržení. Z větve se
+          # nasazení přeskočí a měření nikomu nepřekáží.
           if [ "${PLNE_MERENI:-false}" = "true" ]; then
             echo "Měření přes VŠECHNY prohlížeče (ruční spuštění)."
             PROJEKTY=""

@@ -164,6 +164,24 @@ jobs:
               exit 1
             }
 
+          # ── Kolik se toho vůbec neprohlédlo ───────────────────────────────
+          #
+          # `--max-target-megabytes 5` velké soubory přeskakuje a NEŘEKNE TO.
+          # Bez tohohle řádku by krok hlásil čisto i ve chvíli, kdy desítky
+          # megabajtů v historii nikdo neotevřel — tedy přesně ten druh
+          # tichého selhání, kvůli kterému tahle úloha vznikla.
+          #
+          # V historii leží commitnutá npm cache s objekty po 64, 41 a 36 MB.
+          # `%(rest)` je nutné: `git rev-list --objects` dává řádky „sha cesta"
+          # a bez něj by `cat-file` bral celý řádek jako jméno objektu, nic
+          # nenašel a tiše hlásil nulu. Ověřeno — první verze přesně tohle dělala.
+          VELKE=$(git rev-list --objects --all 2>/dev/null \
+            | git cat-file --batch-check='%(objecttype) %(objectsize) %(rest)' 2>/dev/null \
+            | awk '$1=="blob" && $2 > 5242880' | wc -l | tr -d ' ')
+          if [ "${VELKE:-0}" -gt 0 ]; then
+            echo "::warning::Kvůli limitu 5 MB se neprohlédlo ${VELKE} objektů v historii. Čistý výsledek platí JEN mimo ně."
+          fi
+
       # ── 3. Statická analýza ─────────────────────────────────────────────
       - name: Statická analýza kódu
         continue-on-error: true
@@ -215,18 +233,24 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      # ── Zatím NEBLOKUJE, a je to záměr ──────────────────────────────────
+      # ── Co blokuje a co zatím jen měří ──────────────────────────────────
       #
-      # Tyhle tři nástroje nad tímhle repozitářem nikdy neběžely, takže první
-      # běhy skoro jistě něco najdou — včetně plané poplachy. Kdyby to hned
-      # shazovalo PR, skončí to jedním ze dvou způsobů: buď se kontrola vypne,
-      # nebo se na červenou přestane koukat. Obojí je horší než dnešek.
+      # Tajemství BLOKUJÍ: jejich výchozí stav je rozebraný a odůvodněné
+      # výjimky jsou v `.gitleaks.toml`.
       #
-      # Stejný postup jako u měření testů: nejdřív změřit, pak podle naměřeného
-      # nastavit mez. Až bude výchozí stav známý a uklizený, tenhle krok se
-      # změní na skutečnou bránu.
+      # Závislosti a statická analýza zatím jen MĚŘÍ. Jejich výchozí stav
+      # uklizený není a brána, která je červená pořád, skončí jedním ze dvou
+      # způsobů: buď se vypne, nebo se na červenou přestane koukat.
+      #
+      # Tenhle krok dřív tiskl „úloha záměrně neshazuje" — od chvíle, kdy
+      # tajemství blokují, to byla nepravda na posledním řádku logu, tedy
+      # přesně tam, kam se kouká.
       - name: Verdikt
         if: always()
         run: |
           echo "Kontrola proběhla. Výsledky jsou ve shrnutí úlohy a v artefaktu."
-          echo "Tahle úloha zatím běh ZÁMĚRNĚ neshazuje — viz komentář ve workflow."
+          echo ""
+          echo "BLOKUJE:   tajemství v historii (gitleaks)"
+          echo "jen měří:  zranitelné závislosti, statická analýza"
+          echo ""
+          echo "Zelená u měřicích kroků NENÍ důkaz, že nic nenašly — čísla jsou ve shrnutí."
