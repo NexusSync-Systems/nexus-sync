@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Phone,
   MessageSquare,
+  Smartphone,
   ArrowUpRight,
   ArrowDownLeft,
   X
