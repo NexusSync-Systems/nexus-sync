@@ -15,6 +15,11 @@
 > **Aktuální postup nasazení:** `.github/workflows/ci.yml`, úloha
 > `deploy-backend`. Přestavba serveru: `docs/novy-server-runbook.md`.
 >
+> **Skripty, na které text níž odkazuje, už v repozitáři nejsou.**
+> `scripts/push-all.sh`, `scripts/sync-server-to-prod.sh`
+> a `scripts/sync-backend.js` byly odstraněné; `push-all.sh` navíc dělal
+> `git push origin master`, což protected master odmítá.
+>
 > Text níž zůstává jako záznam, jak to fungovalo dřív. Nepoužívat jako návod.
 
 ## Dvě repa

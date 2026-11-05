@@ -428,8 +428,9 @@ jobs:
           # ── Proč chromium, a kdy všechny prohlížeče ──────────────────────
           #
           # Běžně se měří jen na chromiu. Důvod není šetrnost, ale závislosti:
-          # `sync-backend` čeká na `e2e-tests` a `deploy-backend` na něj, takže
-          # delší měření uvnitř téhle úlohy zdrží KAŽDÉ nasazení. Projekty jsou
+          # `deploy-backend` má `needs: [test, e2e-tests]`, takže delší měření
+          # uvnitř téhle úlohy zdrží KAŽDÉ nasazení. (Do #168 to viselo přes
+          # mezikrok `sync-backend`; ta úloha už neexistuje.) Projekty jsou
           # čtyři (chromium, mobile, firefox, webkit) a 172 testů přes všechny
           # je řádově desítky minut.
           #
