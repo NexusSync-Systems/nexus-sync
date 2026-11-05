@@ -652,7 +652,7 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git subtree split --prefix=server -b server-only
-          git remote add backend https://github.com/Zdenekdi/nexus-backend.git
+          git remote add backend https://github.com/NexusSync-Systems/nexus-backend.git
           git config --global http.https://github.com/.extraheader "AUTHORIZATION: basic $(echo -n x-access-token:${{ secrets.SYNC_BACKEND_TOKEN }} | base64)"
           git push backend server-only:master --force
 

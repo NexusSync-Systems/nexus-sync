@@ -112,7 +112,7 @@ Tohle je **největší zbývající riziko**. Zálohy leží na tomtéž stroji,
 se bojíme. `bash scripts/odvez-zalohu.sh` je odveze na Mac, ale musí ho někdo
 spustit.
 
-**Proč to neodváží CI:** repozitář `Zdenekdi/nexus-sync` je **veřejný**
+**Proč to neodváží CI:** repozitář `NexusSync-Systems/nexus-sync` je **veřejný**
 a artefakty i logy veřejného repozitáře jsou veřejně ke stažení. Šifrovaná
 kopie produkční databáze v artefaktu by byla veřejně dostupná — šifrovaná sice,
 ale natrvalo a pro kohokoli. To za pohodlí nestojí.
