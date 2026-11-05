@@ -3,7 +3,7 @@ const path = require('path');
 const fs   = require('fs');
 const { execSync } = require('child_process');
 
-const REPO        = 'Zdenekdi/nexus-sync';
+const REPO        = 'NexusSync-Systems/nexus-sync';
 const ENV_PATH    = path.join(__dirname, '../server/.env');
 // Adresa API se NEZAPISUJE. Tenhle skript secret API_BASE_URL skutečně
 // nastavuje, takže zapsaná hodnota se jeho spuštěním rozšíří do CI — a přesně

@@ -178,7 +178,7 @@ Proměnnou `DB_HESLO` nechte v tomtéž shellu — použije se v dalším kroku 
 Kód. Nasazení očekává klon **backendového** repozitáře přesně v `/root/nexus-backend` — tam úloha `sync-backend` posílá podsložku `server/`:
 
 ```bash
-git clone https://github.com/Zdenekdi/nexus-backend.git /root/nexus-backend
+git clone https://github.com/NexusSync-Systems/nexus-backend.git /root/nexus-backend
 cd /root/nexus-backend
 npm install
 ```

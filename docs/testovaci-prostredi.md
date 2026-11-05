@@ -67,7 +67,7 @@ sudo -u postgres psql -c "CREATE USER nexus_test WITH PASSWORD 'zvol-vlastni';"
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE nexus_test TO nexus_test;"
 
 # 2. Druhá kopie kódu
-git clone https://github.com/Zdenekdi/nexus-sync.git /root/nexus-backend-test
+git clone https://github.com/NexusSync-Systems/nexus-sync.git /root/nexus-backend-test
 cd /root/nexus-backend-test/server && npm install
 
 # 3. Nginx: nexus-test-api.myvnc.com → 127.0.0.1:3001

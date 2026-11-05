@@ -1,8 +1,8 @@
 # Repo sync — monorepo ↔ produkční backend
 
 ## Dvě repa
-- **`origin` = `Zdenekdi/nexus-sync`** — celý **monorepo** (client + server + android). **Zdroj pravdy.**
-- **`live` = `Zdenekdi/nexus-backend`** — jen složka **`server/`** projektovaná do rootu. Běží na produkci; **push do `master` = deploy** (přes `.github/workflows/deploy.yml` → SSH na VPS → `prisma db push` + pm2 restart).
+- **`origin` = `NexusSync-Systems/nexus-sync`** — celý **monorepo** (client + server + android). **Zdroj pravdy.**
+- **`live` = `NexusSync-Systems/nexus-backend`** — jen složka **`server/`** projektovaná do rootu. Běží na produkci; **push do `master` = deploy** (přes `.github/workflows/deploy.yml` → SSH na VPS → `prisma db push` + pm2 restart).
 
 ## Zdroj pravdy pro `server/`
 **Monorepo (origin) je zdroj pravdy.** Serverové změny se dělají v monorepu a odtud tečou na produkci. Do `nexus-backend` se **nemá commitovat/mergovat přímo** (viz drift níže).
