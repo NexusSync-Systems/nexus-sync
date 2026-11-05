@@ -895,12 +895,36 @@ jobs:
             pm2 restart nexus-backend-final --update-env || pm2 start src/index.js --name nexus-backend-final
             sleep 3
             pm2 status nexus-backend-final | grep -q online && echo "Deploy OK" || exit 1
-            # Zajištění oprávnění pro Nginx (www-data) číst z /root složky (403 Forbidden Fix)
+            # ── Údržba instance proti zabavení Oraclem ─────────────────────────
+            #
+            # Always Free instanci smí Oracle zabavit, když je 7 dní nečinná
+            # (95. percentil CPU pod 20 %). Měřeno 5. 11. 2026 ze sysstatu:
+            # 2,22 %, tedy devětkrát pod mezí.
+            #
+            # Instaluje se odsud, protože jinak než nasazením se na server
+            # zapsat nedá — a zároveň se tím opatření samo obnoví, kdyby se
+            # stroj přestavoval.
+            #
+            # Nefatální schválně: běžící aplikace je důležitější než zátěž.
+            # Že se to opravdu nainstalovalo, hlídá workflow Hlídka serveru —
+            # selže, když /etc/cron.d/nexus-udrzba chybí.
+            bash scripts/server-cron/instaluj-udrzbu.sh \
+              || echo "::warning::Instalace údržby instance neprošla — instance zůstává kandidátem na zabavení."
+
+            # Stahování APK obsluhuje Express z public/downloads (viz app.js),
+            # ne nginx, a běží jako root — na právech mu tedy nezáleží. Tyhle
+            # chmody jsou pojistka pro případ, že by soubory někdy servíroval
+            # nginx jako www-data.
+            #
+            # Dřív tu byly cesty /root/nexus-backend/server/..., které na
+            # serveru VŮBEC NEEXISTUJÍ — kód leží přímo v /root/nexus-backend.
+            # Kvůli `|| true` to tiše nedělalo nic a práva na skutečné cestě
+            # nastavil 3. 11. 2026 někdo ručně. Po přestavbě stroje by se
+            # nenastavila a stahování APK by přestalo fungovat.
             chmod o+x /root || true
             chmod o+x /root/nexus-backend || true
-            chmod o+x /root/nexus-backend/server || true
-            chmod o+x /root/nexus-backend/server/public || true
-            chmod -R o+rx /root/nexus-backend/server/public/downloads || true
+            chmod o+x /root/nexus-backend/public || true
+            chmod -R o+rx /root/nexus-backend/public/downloads || true
             NEXUS_DEPLOY
 
   deploy-frontend:
@@ -981,6 +1005,180 @@ jobs:
         env:
           BACKUP_DIR:     '/tmp/nexus-backups'
           RETENTION_DAYS: ${{ secrets.BACKUP_RETENTION_DAYS || '30' }}
+
+  # ── Údržba instance proti zabavení (Oracle Always Free) ──────────────────────
+  #
+  # Tyhle skripty běží na produkčním serveru jako root z cronu. Zápis na server
+  # přes SSH je mimo to, co smím dělat, takže je tam instaluje nasazení — a tím
+  # spíš musí být ověřené TADY, dřív než se tam dostanou.
+  #
+  # Netestuje se „skript skončil nulou". Testuje se, že OPRAVDU VZNIKLA ZÁTĚŽ
+  # (měří se jiffies v /proc/stat), že vypínač funguje, že se běhy nevrství
+  # a že instalátor cronu je idempotentní.
+  udrzba-instance-test:
+    name: Test údržby instance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shellcheck
+        run: |
+          shellcheck --version
+          shellcheck server/scripts/server-cron/udrzuj-instanci.sh \
+                     server/scripts/server-cron/instaluj-udrzbu.sh
+
+      - name: Bit x je ve gitu
+        run: |
+          set -euo pipefail
+          for S in udrzuj-instanci.sh instaluj-udrzbu.sh; do
+            REZIM=$(git ls-files --stage "server/scripts/server-cron/$S" | awk '{print $1}')
+            # Bez spustitelného bitu v gitu by rsync na server dovezl soubor,
+            # který cron nespustí — a selhávalo by to tiše každou půlhodinu.
+            if [ "$REZIM" != "100755" ]; then
+              echo "::error::$S má v gitu režim $REZIM, čekáno 100755 (spustitelný)."
+              exit 1
+            fi
+            echo "✓ $S je 100755"
+          done
+
+      - name: Zátěž opravdu vznikne
+        run: |
+          set -euo pipefail
+
+          # „nice" čas v /proc/stat je tady ten správný ukazatel: zátěž běží
+          # s nice 19, takže se započítá právě sem a na jinak nevytíženém
+          # runneru je to čistý signál. Jiffies jsou stovkiny sekundy.
+          PRED=$(awk '/^cpu /{print $3}' /proc/stat)
+
+          sudo NEXUS_UDRZBA_SEKUND=6 bash server/scripts/server-cron/udrzuj-instanci.sh
+
+          PO=$(awk '/^cpu /{print $3}' /proc/stat)
+          ROZDIL=$(( PO - PRED ))
+          echo "nice jiffies: $PRED → $PO (rozdíl $ROZDIL, tedy ~$(( ROZDIL / 100 )) s CPU)"
+
+          # Šest sekund na jednom vlákně je ~600 jiffies. Mez 200 je volná
+          # schválně — runner může být vytížený jinými věcmi.
+          if [ "$ROZDIL" -lt 200 ]; then
+            echo "::error::Zátěž nevznikla (rozdíl jen $ROZDIL jiffies). Skript neběžel nebo neběžel na CPU."
+            exit 1
+          fi
+
+          # A že o sobě nechal stopu, kterou čte hlídka.
+          sudo grep -q 'OK:' /var/log/nexus-udrzba.log || {
+            echo "::error::V logu chybí řádek OK: — hlídka by to hlásila jako selhání údržby."
+            sudo cat /var/log/nexus-udrzba.log || true
+            exit 1
+          }
+          sudo test -s /var/log/nexus-udrzba-posledni.txt || {
+            echo "::error::Nevznikl soubor s posledním během."
+            exit 1
+          }
+          echo "✓ zátěž vznikla, log i stopa jsou na místě"
+
+      - name: Vypínač zastaví zátěž
+        run: |
+          set -euo pipefail
+
+          # Kdyby zátěž na produkci někdy překážela, musí jít zastavit bez
+          # nasazení a bez editace cronu. Když tohle nefunguje, nemá se to
+          # na server vůbec dostat.
+          sudo touch /etc/nexus-udrzba-vypnuto
+          PRED=$(awk '/^cpu /{print $3}' /proc/stat)
+          sudo NEXUS_UDRZBA_SEKUND=6 bash server/scripts/server-cron/udrzuj-instanci.sh
+          PO=$(awk '/^cpu /{print $3}' /proc/stat)
+          ROZDIL=$(( PO - PRED ))
+          echo "nice jiffies při vypnutém stavu: rozdíl $ROZDIL"
+
+          if [ "$ROZDIL" -gt 100 ]; then
+            echo "::error::Vypínač nezabral — zátěž vznikla i s /etc/nexus-udrzba-vypnuto."
+            exit 1
+          fi
+          sudo grep -q 'VYPNUTO' /var/log/nexus-udrzba.log || {
+            echo "::error::Vypnutý běh se nezapsal do logu."
+            exit 1
+          }
+          sudo rm -f /etc/nexus-udrzba-vypnuto
+          echo "✓ vypínač funguje"
+
+      - name: Běhy se nevrství
+        run: |
+          set -euo pipefail
+
+          # Na zpomaleném stroji by se běhy mohly překrývat a zátěž by rostla
+          # místo toho, aby zůstala na nastavené úrovni. Druhý běh musí odejít.
+          sudo NEXUS_UDRZBA_SEKUND=10 bash server/scripts/server-cron/udrzuj-instanci.sh &
+          PRVNI=$!
+          sleep 2
+          sudo NEXUS_UDRZBA_SEKUND=10 bash server/scripts/server-cron/udrzuj-instanci.sh
+          wait $PRVNI
+
+          sudo grep -q 'PŘESKAKUJI' /var/log/nexus-udrzba.log || {
+            echo "::error::Druhý souběžný běh se nezastavil — zámek nefunguje."
+            sudo tail -5 /var/log/nexus-udrzba.log || true
+            exit 1
+          }
+          echo "✓ zámek drží, druhý běh odešel"
+
+      - name: Instalátor cronu je idempotentní
+        run: |
+          set -euo pipefail
+
+          PRVNI=$(sudo bash server/scripts/server-cron/instaluj-udrzbu.sh)
+          echo "$PRVNI"
+          echo "$PRVNI" | grep -q 'Nastaven cron' || {
+            echo "::error::První instalace cron nenastavila."
+            exit 1
+          }
+
+          # Soubor v /etc/cron.d musí mít uživatele v šestém poli, jinak ho
+          # cron tiše ignoruje a nikdo si toho nevšimne.
+          echo "--- /etc/cron.d/nexus-udrzba ---"
+          sudo cat /etc/cron.d/nexus-udrzba
+          RADEK=$(sudo grep -E '^[0-9,*/-]+ ' /etc/cron.d/nexus-udrzba | head -1)
+          POLI=$(echo "$RADEK" | awk '{print NF}')
+          if [ "$POLI" -lt 7 ]; then
+            echo "::error::Řádek cronu má jen $POLI polí — chybí uživatel nebo cesta."
+            exit 1
+          fi
+          echo "$RADEK" | awk '{print $6}' | grep -qx root || {
+            echo "::error::V šestém poli není root."
+            exit 1
+          }
+          CESTA=$(echo "$RADEK" | awk '{print $7}')
+          sudo test -x "$CESTA" || {
+            echo "::error::Cron ukazuje na $CESTA, což není spustitelný soubor."
+            exit 1
+          }
+
+          REZIM=$(stat -c %a /etc/cron.d/nexus-udrzba)
+          [ "$REZIM" = "644" ] || {
+            echo "::error::/etc/cron.d/nexus-udrzba má režim $REZIM, cron vyžaduje 644."
+            exit 1
+          }
+
+          # Druhé nasazení nesmí soubor přepsat — jinak by se při každém
+          # nasazení měnil mtime a nešlo by poznat, kdy se to vlastně změnilo.
+          DRUHY=$(sudo bash server/scripts/server-cron/instaluj-udrzbu.sh)
+          echo "$DRUHY"
+          echo "$DRUHY" | grep -q 'už nastavený' || {
+            echo "::error::Druhé spuštění není idempotentní."
+            exit 1
+          }
+          echo "✓ instalátor je idempotentní, cron je platný"
+
+      - name: Instalátor odmítne chybějící skript
+        run: |
+          set -euo pipefail
+
+          # Cron ukazující na neexistující soubor by selhával každou půlhodinu
+          # a hlídka by hlásila nefunkční ochranu. Instalátor to musí zachytit.
+          mkdir -p /tmp/prazdno
+          cp server/scripts/server-cron/instaluj-udrzbu.sh /tmp/prazdno/
+          if sudo bash /tmp/prazdno/instaluj-udrzbu.sh; then
+            echo "::error::Instalátor prošel i bez udrzuj-instanci.sh vedle sebe."
+            exit 1
+          fi
+          echo "✓ instalátor bez skriptu odmítl pokračovat"
 
   # ── Android Relay field test (post-deploy liveness check) ─────────────────────
   relay-field-test:

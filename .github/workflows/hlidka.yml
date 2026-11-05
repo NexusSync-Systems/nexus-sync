@@ -1,0 +1,200 @@
+name: Hlídka serveru
+
+# Co tohle řeší: na serveru NENÍ žádný upozorňovací kanál — cron tam nemá kam
+# poslat mail, takže když noční záloha přestane běhat nebo aplikace spadne,
+# nikdo se to nedozví. Audit `Backup / Restore Readiness Audit` v CI o serveru
+# nevypovídá nic, běží na runneru.
+#
+# Tohle je ten chybějící kanál. Když kontrola selže, GitHub pošle mail o spadlém
+# běhu naplánovaného workflow. Žádný secret navíc k tomu není potřeba.
+#
+# ZÁMĚRNĚ NEZAKLÁDÁ ISSUE: repozitář je veřejný, takže issue „server je dole,
+# disk plný" by zůstalo veřejně čitelné navždy. Mail o spadlém běhu jde jen
+# vlastníkovi.
+#
+# Ze stejného důvodu jsou výpisy úsporné: logy veřejného repozitáře vidí každý.
+# Hlásí se verdikty a čísla, ne výpisy adresářů a cest.
+#
+# POZOR, DVĚ VLASTNOSTI NAPLÁNOVANÝCH WORKFLOW:
+#  1. Běží jen z výchozí větve. Na téhle větvi se tedy nespustí — po sloučení
+#     do masteru ano, a ručně kdykoli přes „Run workflow".
+#  2. GitHub naplánovaná workflow VYPNE po 60 dnech bez aktivity v repozitáři.
+#     Pak hlídka tiše přestane hlídat. Viz docs/jak-neprijit-o-server.md.
+
+on:
+  schedule:
+    # Každé dvě hodiny. Ne na :00 — tam míří půlka plochy GitHubu a běhy se
+    # odkládají o desítky minut.
+    - cron: '17 */2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hlidka
+  cancel-in-progress: false
+
+jobs:
+  kontrola:
+    name: Kontrola serveru
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      # ── 1. Zvenčí, bez přihlášení ─────────────────────────────────────────
+      # Tohle je to, co vidí uživatel aplikace. Kdyby selhalo jen tohle
+      # a SSH prošlo, je problém v nginxu nebo v aplikaci, ne ve stroji.
+      - name: Odpovídá API
+        run: |
+          set -uo pipefail
+          # Při nedostupném stroji vypíše curl do %{http_code} rovnou "000",
+          # takže tady nepotřebuju záložní `|| echo` — ten by jen přilepil
+          # druhou hodnotu a hlášku rozbil.
+          KOD=$(curl -s -o /tmp/zdravi.json -w '%{http_code}' -m 25 \
+                https://api.nexusstack.eu/health)
+
+          if [ "$KOD" != "200" ]; then
+            echo "::error::API neodpovědělo 200 (dostal jsem $KOD). Aplikace nebo stroj je dole."
+            exit 1
+          fi
+
+          # Samo „200" nestačí: aplikace odpovídá i s odpojenou databází,
+          # jen s jiným tělem. Tohle je ta podstatná část.
+          if ! grep -q '"database":"connected"' /tmp/zdravi.json; then
+            echo "::error::API odpovídá, ale databáze NENÍ připojená."
+            exit 1
+          fi
+          echo "✓ API odpovídá, databáze připojená."
+
+      - name: Platnost certifikátu
+        run: |
+          set -uo pipefail
+          KONEC=$(echo | openssl s_client -connect api.nexusstack.eu:443 \
+                    -servername api.nexusstack.eu 2>/dev/null \
+                  | openssl x509 -noout -enddate 2>/dev/null \
+                  | cut -d= -f2)
+
+          if [ -z "$KONEC" ]; then
+            echo "::error::Nepodařilo se přečíst certifikát."
+            exit 1
+          fi
+
+          DNI=$(( ( $(date -d "$KONEC" +%s) - $(date +%s) ) / 86400 ))
+          echo "Certifikát platí ještě $DNI dní."
+
+          # certbot.timer obnovuje ve 30 dnech před koncem. Když je pod 21,
+          # obnova nejspíš neproběhla — a vypršelý certifikát znamená, že
+          # aplikace i relay telefony přestanou mluvit se serverem.
+          if [ "$DNI" -lt 7 ]; then
+            echo "::error::Certifikát vyprší za $DNI dní a obnova neproběhla."
+            exit 1
+          elif [ "$DNI" -lt 21 ]; then
+            echo "::warning::Certifikát vyprší za $DNI dní — certbot měl obnovit ve 30. Zkontrolovat certbot.timer."
+          fi
+
+      # ── 2. Na stroji, jen pro čtení ───────────────────────────────────────
+      # Secrety nejde testovat v `if:` na úrovni kroku (kontext secrets tam
+      # není dostupný), proto se přelévají do env a testuje se env.
+      - name: Stav stroje přes SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "${DEPLOY_SSH_KEY:-}" ] || [ -z "${DEPLOY_HOST:-}" ]; then
+            echo "::error::Chybí DEPLOY_SSH_KEY nebo DEPLOY_HOST — na stroj se nedostanu a hlídka je poloslepá."
+            exit 1
+          fi
+
+          KLIC="$RUNNER_TEMP/hlidka_key"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$KLIC"
+          chmod 600 "$KLIC"
+
+          # Všechno uvnitř je jen pro čtení. Hlídka na serveru nic nemění.
+          # `sudo` je potřeba kvůli /var/backups a /var/log, které jsou 600.
+          ssh -i "$KLIC" \
+              -o StrictHostKeyChecking=accept-new \
+              -o ConnectTimeout=25 -o BatchMode=yes \
+              "$DEPLOY_USER@$DEPLOY_HOST" "sudo bash -s" <<'KONTROLA_EOF'
+          set -uo pipefail
+          CHYBY=0
+          chyba() { echo "::error::$*"; CHYBY=$((CHYBY+1)); }
+          varuj() { echo "::warning::$*"; }
+
+          # ── aplikace ──
+          if pm2 status nexus-backend-final 2>/dev/null | grep -q online; then
+            echo "✓ pm2: aplikace běží"
+          else
+            chyba "pm2: aplikace NEBĚŽÍ"
+          fi
+
+          # ── disk ──
+          # Plný disk na tomhle stroji zastaví zálohy i zápis logů, a pozná
+          # se to až tím, že něco přestane fungovat.
+          PCT=$(df --output=pcent / | tail -1 | tr -dc '0-9')
+          echo "disk: ${PCT} %"
+          if [ "${PCT:-0}" -ge 90 ]; then
+            chyba "disk je zaplněný na ${PCT} % — zálohy přestanou vznikat"
+          elif [ "${PCT:-0}" -ge 80 ]; then
+            varuj "disk je zaplněný na ${PCT} %"
+          fi
+
+          # ── zálohy ──
+          # Tohle je ta kontrola, kterou audit v CI NEUMÍ: dívá se na stroj.
+          NEJNOVEJSI=$(ls -t /var/backups/nexus/nexus_*.dump 2>/dev/null | head -1)
+          if [ -z "$NEJNOVEJSI" ]; then
+            chyba "v /var/backups/nexus NENÍ žádná záloha"
+          else
+            VEK_H=$(( ( $(date +%s) - $(stat -c %Y "$NEJNOVEJSI") ) / 3600 ))
+            echo "nejnovější záloha: ${VEK_H} h stará"
+            if [ "$VEK_H" -gt 36 ]; then
+              chyba "nejnovější záloha je ${VEK_H} h stará (mez 36 h) — noční cron nejspíš neběží"
+            fi
+            # Šifrovaná kopie je to jediné, co má smysl odvážet ze stroje.
+            # Dump bez .gpg znamená, že šifrovací krok selhal.
+            if ! ls /var/backups/nexus/*.gpg >/dev/null 2>&1; then
+              chyba "existuje dump, ale ŽÁDNÁ šifrovaná kopie — odvézt ze serveru není co"
+            fi
+          fi
+
+          # Značky, které tam nechávají skripty záloh, když selžou. Cron nemá
+          # kam poslat mail, takže tyhle soubory jsou jediná jejich stopa.
+          for Z in /var/backups/nexus/SELHALO-*.txt \
+                   /var/backups/nexus/ZALOHA-ZASTARALA.txt \
+                   /var/backups/nexus/ZADNA-ZALOHA.txt; do
+            [ -e "$Z" ] && chyba "na serveru leží značka selhání zálohy: $(basename "$Z")"
+          done
+
+          # ── údržba instance proti zabavení ──
+          CRON=/etc/cron.d/nexus-udrzba
+          LOG=/var/log/nexus-udrzba.log
+          if [ ! -f "$CRON" ]; then
+            chyba "není nastavená údržba instance ($CRON chybí) — instance je kandidát na zabavení Oraclem"
+          else
+            # Počet úspěšných běhů za 24 h je spolehlivější údaj než `sar`:
+            # ten vzorkuje po deseti minutách a pětiminutovou zátěž zprůměruje.
+            # Čeká se 48 běhů denně (dvakrát za hodinu).
+            MEZ=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+            BEHU=$(awk -v m="$MEZ" '$1 >= m && /OK:/ {n++} END{print n+0}' "$LOG" 2>/dev/null || echo 0)
+            VEK_CRON_H=$(( ( $(date +%s) - $(stat -c %Y "$CRON") ) / 3600 ))
+            echo "údržba instance: ${BEHU} běhů za 24 h (čekáno 48), cron nastaven před ${VEK_CRON_H} h"
+
+            if [ "$VEK_CRON_H" -lt 26 ]; then
+              echo "  (cron je mladší než den, počet běhů ještě nemá cenu hodnotit)"
+            elif [ "$BEHU" -lt 40 ]; then
+              chyba "údržba instance proběhla jen ${BEHU}x za 24 h místo 48 — ochrana proti zabavení nefunguje"
+            fi
+          fi
+
+          if [ "$CHYBY" -gt 0 ]; then
+            echo "Kontrola stroje našla $CHYBY problém(ů)."
+            exit 1
+          fi
+          echo "✓ Stroj je v pořádku."
+          KONTROLA_EOF
+          VYSLEDEK=$?
+
+          rm -f "$KLIC"
+          exit $VYSLEDEK

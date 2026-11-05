@@ -1,17 +1,37 @@
 # Co běží na serveru z cronu
 
-Tyhle tři skripty jsou **kopie toho, co leží na backend serveru**
-v `/root/nexus-zalohy/`. V repozitáři jsou proto, že 3. 11. 2026 jsme o server
-přišli a s ním by zmizely i ony — tedy přesně ta chyba, kterou zálohy řeší.
+**Pozor, dvě skupiny souborů s různým režimem.**
 
-Nejsou to skripty, které by se spouštěly z repozitáře. Server si je drží sám,
-protože musí fungovat i ve chvíli, kdy na něm žádný klon repozitáře není.
+## Zálohy: kopie toho, co si server drží sám
+
+`nocni-zaloha.sh`, `sifrovana-kopie.sh`, `kontrola-veku.sh` jsou **kopie toho,
+co leží na serveru** v `/root/nexus-zalohy/`. V repozitáři jsou proto, že
+3. 11. 2026 jsme o server přišli a s ním by zmizely i ony — tedy přesně ta
+chyba, kterou zálohy řeší.
+
+Tyhle se **z repozitáře nespouštějí**. Server si je drží sám, protože musí
+fungovat i ve chvíli, kdy na něm žádný klon repozitáře není.
 
 | Soubor | Kdy běží | Co dělá |
 | --- | --- | --- |
 | `nocni-zaloha.sh` | 3:17 UTC | zavolá `backup-postgres.sh`, pak `sifrovana-kopie.sh` |
 | `sifrovana-kopie.sh` | z nočního běhu | GPG AES256 + zkušební rozšifrování |
 | `kontrola-veku.sh` | 9:05 UTC | selže, když nejnovější záloha je starší než 36 h |
+
+## Údržba instance: běží PŘÍMO odsud
+
+`udrzuj-instanci.sh` a `instaluj-udrzbu.sh` naopak server spouští z místa, kam
+je doručil rsync (`/root/nexus-backend/scripts/server-cron/`). Cron na ně
+ukazuje tam, takže se aktualizují s každým nasazením.
+
+| Soubor | Kdy běží | Co dělá |
+| --- | --- | --- |
+| `udrzuj-instanci.sh` | min. 4 a 34 každou hodinu | 5 min zátěže na jednom vlákně, aby Oracle instanci nezabavil za nečinnost |
+| `instaluj-udrzbu.sh` | z nasazení | idempotentně nastaví `/etc/cron.d/nexus-udrzba` |
+
+Vypínač zátěže: `touch /etc/nexus-udrzba-vypnuto` (nasazení ho nepřepíše).
+
+Proč to vůbec existuje, měření a co to **neřeší**: `docs/jak-neprijit-o-server.md`.
 
 ## Nasazení na čistý server
 
@@ -37,7 +57,16 @@ oddíl „What is actually configured".
 
 ## Když se tyhle soubory změní
 
-Změna v repozitáři se na server **nedostane sama** — nasazování z CI zatím
-nefunguje. Po úpravě je potřeba je na server znovu nakopírovat a ověřit, že
-noční řetěz proběhne celý (`/root/nexus-zalohy/nocni-zaloha.sh` ručně, v logu
-musí být i řádek o zašifrování).
+**Skripty údržby instance** se na server dostanou samy — rsync je doručí při
+nasazení a cron na ně ukazuje do doručeného adresáře. Ověřuje je úloha
+`Test údržby instance` v CI, která je opravdu spustí a změří, že zátěž vznikla.
+
+**Skripty záloh** se na server samy nedostanou. Cron na ně ukazuje do
+`/root/nexus-zalohy/`, kam rsync nesahá — a to je záměr, mají fungovat i bez
+klonu repozitáře. Po úpravě je tedy potřeba je na server znovu nakopírovat
+a ověřit, že noční řetěz proběhne celý (`/root/nexus-zalohy/nocni-zaloha.sh`
+ručně, v logu musí být i řádek o zašifrování).
+
+Dřív tu stálo, že změna se na server nedostane sama, protože „nasazování z CI
+zatím nefunguje". Od PR #155 funguje — ale pro skripty záloh platí dál, že je
+nasazení nepřenáší, protože leží mimo doručovaný adresář.
