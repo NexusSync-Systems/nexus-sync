@@ -83,9 +83,11 @@ const AIInsightCard = ({ stats, _agencies, systemHealth }) => {
     const isCz = lang === 'cz' || lang === 'cs';
     const isAppOwner = activeRole === 'app_owner';
     
-    let context = "";
-    let systemPrompt = "";
-    let userPrompt = "";
+    // Bez inicializace: obě větve níž (app_owner / ostatní) všechny tři
+    // proměnné přiřazují, takže `= ""` byl mrtvý zápis.
+    let context;
+    let systemPrompt;
+    let userPrompt;
 
     if (isAppOwner && systemHealth) {
       // Technical Perspective for App Owner

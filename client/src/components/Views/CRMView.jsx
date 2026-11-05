@@ -167,7 +167,7 @@ const CRMView = () => {
                     <td style={{ padding: '1.2rem 1.5rem' }}>
                       <div style={{ display: 'flex', gap: '0.4rem' }}>
                         {(() => {
-                          let parsedTags = [];
+                          let parsedTags;
                           try { parsedTags = JSON.parse(client.tags || '[]'); } catch { parsedTags = []; }
                           if (!Array.isArray(parsedTags)) parsedTags = [];
                           

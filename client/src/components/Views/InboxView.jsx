@@ -708,7 +708,7 @@ const InboxView = () => {
                           const yesterday = new Date(today);
                           yesterday.setDate(yesterday.getDate() - 1);
                           
-                          let displayDateStr = '';
+                          let displayDateStr;
                           if (dateObj.getTime() === today.getTime()) {
                             displayDateStr = lang === 'cz' ? 'Dnes' : 'Today';
                           } else if (dateObj.getTime() === yesterday.getTime()) {
