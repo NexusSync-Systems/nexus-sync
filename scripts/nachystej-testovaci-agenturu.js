@@ -5,7 +5,7 @@
  * SPOUŠTÍ TO ČLOVĚK, ne automat. Zakládá to účty na ostrém serveru, a to je
  * rozhodnutí, které má udělat někdo, kdo za ten server odpovídá.
  *
- *   (umask 077; printf '%s\n' 'TvojeHeslo1' > ~/.nexus-test-admin-heslo)
+ *   (umask 077; printf 'T%sa7\n' "$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9')" > ~/.nexus-test-admin-heslo)
  *   node scripts/nachystej-testovaci-agenturu.js --ano
  *
  * Bez `--ano` jen vypíše, co by udělal, a skončí.
@@ -148,7 +148,7 @@ async function zavolej(cesta, { metoda = 'GET', telo, token } = {}) {
     console.error(`  ❌ Nenašel jsem heslo v ${HESLO_SOUBOR}.`);
     console.error('');
     console.error('     Vytvoř ho tak, aby se neuložilo do historie příkazů:');
-    console.error(`         (umask 077; printf '%s\\n' 'TvojeHeslo1' > ${HESLO_SOUBOR})`);
+    console.error(`         (umask 077; printf 'T%sa7\\n' "$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9')" > ${HESLO_SOUBOR})`);
     console.error('');
     console.error(`     Pravidla serveru: ${PRAVIDLA}.`);
     return skonci(1);

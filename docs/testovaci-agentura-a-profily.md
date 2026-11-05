@@ -41,7 +41,7 @@ uživatele. Další role by se musely zakládat zvlášť.
 agenturu, operátorské účty, profily i jejich přiřazení.
 
 ```bash
-(umask 077; printf '%s\n' 'TvojeHeslo1' > ~/.nexus-test-admin-heslo)
+(umask 077; printf 'T%sa7\n' "$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9')" > ~/.nexus-test-admin-heslo)
 ```
 
 ```bash
