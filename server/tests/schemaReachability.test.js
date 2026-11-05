@@ -8,10 +8,18 @@ const schemas = require('../src/middleware/schemas');
  * Takový endpoint vrací 400 na každý požadavek a je tím úplně nedosažitelný —
  * a protože 400 vypadá jako chyba klienta, nikoho to nezačne pálit.
  *
- * Reálný případ: `permissions: z.record(z.boolean())`. Zod 4 bere u z.record()
- * první argument jako typ KLÍČE, takže schéma vyžadovalo boolean klíče. Klíč
- * v JS objektu je vždy string, takže PATCH /api/agency/roles/:id/permissions
- * odmítal všechno — několik týdnů, než si toho někdo všiml.
+ * Reálný případ: `permissions: z.record(z.boolean())`. Zod do verze 4.3 bral
+ * u z.record() první argument jako typ KLÍČE, takže schéma vyžadovalo boolean
+ * klíče. Klíč v JS objektu je vždy string, takže
+ * PATCH /api/agency/roles/:id/permissions odmítal všechno — několik týdnů,
+ * než si toho někdo všiml.
+ *
+ * POZOR, zod to mezitím změnil. Od 4.6.7 (ověřeno 5. 11. 2026) je
+ * u jednoargumentového volání klíč `string` a argument je typ HODNOTY, takže
+ * ta konkrétní past už nesklapne. Testy níž to pokrývají z obou stran:
+ * detektor se zkouší na dvouargumentovém tvaru, kde je boolean klíč
+ * nepochybný, a zvlášť stojí kanárek na chování zodu — kdyby se to někdy
+ * vrátilo zpátky, bude hned jasné proč.
  *
  * Test nepoužívá ručně psané vzorky. Vzorek si poskládá z definice schématu
  * a na každé úrovni ho proti tomu samému schématu ověří, takže nemůže projít
@@ -229,10 +237,26 @@ describe('Kontrolní vzorky generátoru', () => {
     expect(s.safeParse(r.value).success).toBe(true);
   });
 
-  it('odhalí z.record(z.boolean()) — klíč objektu nemůže být boolean', () => {
-    const r = sample(z.object({ permissions: z.record(z.boolean()) }));
+  it('odhalí boolean klíč v z.record — klíč objektu nemůže být boolean', () => {
+    // Dvouargumentový tvar schválně: klíč je tu boolean nade vší pochybnost,
+    // takže se testuje DETEKTOR, ne to, jak zrovna zod vykládá jednoargumentové
+    // volání. Tohle schéma neprojde ani v jedné verzi zodu.
+    const r = sample(z.object({ permissions: z.record(z.boolean(), z.string()) }));
     expect(r.ok).toBe(false);
     expect(r.why).toMatch(/klíč/i);
+  });
+
+  it('jednoargumentové z.record(T) bere zod 4.6+ jako typ HODNOTY, ne klíče', () => {
+    // Kanárek. Do zodu 4.3 bral první argument jako typ KLÍČE, což shodilo
+    // PATCH /api/agency/roles/:id/permissions na několik týdnů (viz komentář
+    // v hlavičce souboru). V 4.6.7 už je klíč string a schéma funguje.
+    //
+    // Kdyby se to někdy vrátilo zpátky, spadne tenhle test — a bude hned
+    // jasné proč, místo aby zase týdny tiše padaly požadavky.
+    expect(z.record(z.boolean()).safeParse({ cokoliv: true }).success).toBe(true);
+
+    const r = sample(z.object({ permissions: z.record(z.boolean()) }));
+    expect(r.ok).toBe(true);
   });
 
   it('odhalí číslo s prázdným intervalem (min > max)', () => {
