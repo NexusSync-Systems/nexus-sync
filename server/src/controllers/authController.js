@@ -71,7 +71,7 @@ async function withAssignedProfile(user) {
 
   try {
     const assignedProfiles = await prisma.profile.findMany({
-      where: { assignedUsers: { some: { id: user.id } } },
+      where: { assignees: { some: { id: user.id } } },
       take: 1,
       select: { id: true }
     });
