@@ -1206,14 +1206,25 @@ jobs:
       - name: Konfigurace se zašifruje, ověří a neunikne do logu
         run: |
           set -euo pipefail
+          # Kontext do logu: chování gpg se mezi verzemi liší a bez tohohle
+          # se u selhání nepozná, jestli jde o skript, nebo o prostředí.
+          gpg --version | head -2
+
           PRAC=$(mktemp -d)
           printf 'dostatecne-dlouhe-testovaci-heslo-nad-dvacet-znaku\n' > "$PRAC/heslo"
           chmod 600 "$PRAC/heslo"
           printf 'ENCRYPTION_KEY=NEMA_SE_OBJEVIT_V_LOGU_XYZZY\nJWT_SECRET=druhe-tajemstvi\n' > "$PRAC/env"
 
-          VYSTUP=$(NEXUS_ZALOHA_HESLO="$PRAC/heslo" NEXUS_ENV_SOUBOR="$PRAC/env" \
-                   NEXUS_BACKUP_DIR="$PRAC/zalohy" \
-                   bash server/scripts/server-cron/zaloha-konfigurace.sh)
+          # Výstup se zachytává kvůli kontrole, že v něm nejsou tajemství —
+          # jenže při selhání by se pod `set -e` ztratil a v logu by zbyl jen
+          # návratový kód. Proto se při neúspěchu vypíše.
+          if ! VYSTUP=$(NEXUS_ZALOHA_HESLO="$PRAC/heslo" NEXUS_ENV_SOUBOR="$PRAC/env" \
+                        NEXUS_BACKUP_DIR="$PRAC/zalohy" \
+                        bash server/scripts/server-cron/zaloha-konfigurace.sh); then
+            echo "::error::Skript zálohy konfigurace selhal. Co stihl vypsat na stdout:"
+            echo "$VYSTUP"
+            exit 1
+          fi
           echo "$VYSTUP"
 
           # 1) Tajemství nesmí být nikde ve výstupu. Skript běží z cronu do

@@ -86,9 +86,24 @@ if ! gpg --batch --yes --quiet \
 fi
 
 # Zašifrovaný soubor, který nikdo nezkusil otevřít, je jen naděje.
-ROZSIFROVANY="$(gpg --batch --quiet --pinentry-mode loopback \
-                    --passphrase-file "$HESLO" --decrypt "$CIL" 2>/dev/null \
-                | sha256sum | cut -d' ' -f1)"
+#
+# Chyba gpg se NEZAHAZUJE. Dřív tu bylo `2>/dev/null`, takže když zkušební
+# rozšifrování selhalo, skript pod `set -e` zemřel s kódem 2 a bez jediného
+# řádku — v logu nasazení i v cronu tedy nebylo z čeho vyjít. Jednou mě to
+# stálo dvě kola hledání, podruhé by to stálo zálohu.
+#
+# Rozšifrovaný obsah zůstává v proměnné a na disk se nezapisuje: je to .env
+# v čitelné podobě a v adresáři záloh nemá co dělat ani na okamžik.
+CHYBA="$(mktemp)"
+if ! ROZSIFROVANY="$(gpg --batch --quiet --pinentry-mode loopback \
+                         --passphrase-file "$HESLO" --decrypt "$CIL" 2>"$CHYBA" \
+                     | sha256sum | cut -d' ' -f1)"; then
+  echo "❌ Zkušební rozšifrování selhalo — archiv zahazuji, protože neověřený nemá cenu:" >&2
+  sed 's/^/   gpg: /' "$CHYBA" >&2
+  rm -f "$CIL" "$CHYBA"
+  exit 1
+fi
+rm -f "$CHYBA"
 if [ "$SOUCET" != "$ROZSIFROVANY" ]; then
   echo "❌ Rozšifrovaný archiv nesouhlasí s konfigurací — mažu ho" >&2
   rm -f "$CIL"
