@@ -20,11 +20,11 @@ async function encrypt(text) {
     // Odvození klíče pomocí PBKDF2 pro vyšší bezpečnost
     const key = await pbkdf2Async(SECRET, salt, 100000, 32, 'sha512');
     
-    const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
-    
+    const cipher = crypto.createCipheriv(ALGORITHM, key, iv, { authTagLength: TAG_LENGTH });
+
     let encrypted = cipher.update(text, 'utf8', 'hex');
     encrypted += cipher.final('hex');
-    
+
     const tag = cipher.getAuthTag();
     
     // Výsledek obsahuje sůl, iv, tag a samotná data pro pozdější dešifrování
@@ -41,9 +41,25 @@ async function decrypt(encryptedData) {
         const iv = Buffer.from(ivHex, 'hex');
         const tag = Buffer.from(tagHex, 'hex');
         
+        // ── Délka ověřovací značky se MUSÍ vynutit ──────────────────────────
+        //
+        // Bez `authTagLength` přijme Node u GCM značku dlouhou i čtyři bajty.
+        // Značka se přitom čte z uloženého řetězce, tedy z databáze. Kdo by
+        // do `profile.credentials` dokázal zapsat, mohl by podstrčit značku
+        // zkrácenou na čtyři bajty — a padělek uhodnout s pravděpodobností
+        // jedna ku čtyřem miliardám místo jedna ku 2^128.
+        //
+        // Zpětná kompatibilita je v pořádku: šifrování vždy ukládalo plných
+        // 16 bajtů (výchozí délka GCM v Node), takže stávající data projdou.
+        // Co neprojde, je značka zkrácená útočníkem — a to je smysl.
+        if (tag.length !== TAG_LENGTH) {
+            console.error(`Decryption failed: ověřovací značka má ${tag.length} B místo ${TAG_LENGTH} B — možný pokus o podvržení.`);
+            return null;
+        }
+
         const key = await pbkdf2Async(SECRET, salt, 100000, 32, 'sha512');
-        
-        const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+
+        const decipher = crypto.createDecipheriv(ALGORITHM, key, iv, { authTagLength: TAG_LENGTH });
         decipher.setAuthTag(tag);
         
         let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
