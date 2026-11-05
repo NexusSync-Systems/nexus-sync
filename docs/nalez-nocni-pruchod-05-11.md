@@ -153,7 +153,6 @@ nejspíš jsem minul skutečné podcesty. Ověřené to není.
 `/profiles` jí vrací **tři modelky**, ačkoli nemá přiřazenou ani jednu —
 tedy přesně to, co opravuje #179, zatím na produkci platí.
 
-Stejnou otázku si zaslouží `/clients` a `/blacklist`: obojí operátorce
-projde a obojí je dnes omezené nejspíš jen agenturou. Do #179 jsem je
-nezahrnul, protože vaše pravidlo mluvilo o chatech a modelkách —
-jestli má platit i na klienty, je to další místo.
+`/clients` a `/blacklist` operátorce také projdou. **Rozhodnuto
+5. 11. 2026: pravidlo se na ně nevztahuje**, platí jen na chaty a modelky.
+Rozsah #179 je tedy správný a tahle otázka je uzavřená.
