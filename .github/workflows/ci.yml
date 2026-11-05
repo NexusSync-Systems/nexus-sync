@@ -42,8 +42,36 @@ jobs:
       - name: Run Relay auth/security regression tests
         run: cd server && npm run test:security
 
+      # `test:ci` místo `test`: je to tentýž jest, jen s `--coverage`.
+      # Skript existoval od začátku, ale CI volalo variantu bez pokrytí, takže
+      # se pokrytí neměřilo vůbec (docs/audit-testu-a-ci.md, nález 3).
+      #
+      # Práh se ZÁMĚRNĚ nenastavuje. Nejdřív se musí vědět, kde jsme; práh
+      # určený od stolu udělá z CI překážku, kterou lidi začnou obcházet.
       - name: Run server tests
-        run: cd server && npm test
+        run: cd server && npm run test:ci -- --coverageReporters=json-summary --coverageReporters=text-summary
+
+      - name: Souhrn pokrytí do shrnutí úlohy
+        if: always()
+        run: |
+          SOUHRN=server/coverage/coverage-summary.json
+          if [ ! -f "$SOUHRN" ]; then
+            echo "### Pokrytí serveru" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Soubor s pokrytím nevznikl — testy nejspíš spadly dřív." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          node -e '
+            const c = require("./server/coverage/coverage-summary.json").total;
+            const r = (k) => `| ${k} | ${c[k].pct} % | ${c[k].covered} / ${c[k].total} |`;
+            console.log("### Pokrytí serveru");
+            console.log("");
+            console.log("| | podíl | pokryto |");
+            console.log("| --- | --- | --- |");
+            for (const k of ["statements", "branches", "functions", "lines"]) console.log(r(k));
+            console.log("");
+            console.log("_Práh zatím nastavený není — tohle je výchozí měření._");
+          ' >> "$GITHUB_STEP_SUMMARY"
 
   # Hlídač schema driftu: postaví DB POUZE z migrací a ověří, že odpovídá
   # schema.prisma. Dřív se schéma nasazovalo přes `db push`, takže migrace
@@ -306,6 +334,63 @@ jobs:
         run: npm run test:all:e2e
         env:
           FRONTEND_URL: ${{ secrets.FRONTEND_URL || 'https://nexus-sync-8d50b.web.app' }}
+
+      # Bez tohohle bylo u zčervenalé úlohy vidět jen její jméno a co přesně
+      # padlo se zjišťovalo projetím logu. Viz docs/audit-testu-a-ci.md, nález 4.
+      # `continue-on-error`: krok, který jen vypisuje, nemá nikdy shodit běh,
+      # kterému testy prošly.
+      - name: Souhrn E2E do shrnutí úlohy
+        if: always()
+        continue-on-error: true
+        run: |
+          node scripts/shrnuti-testu.js \
+            test-results/playwright-results.json \
+            "E2E testy, které CI spouští" >> "$GITHUB_STEP_SUMMARY"
+
+      # ── Měření, ne brána ────────────────────────────────────────────────
+      #
+      # `test:all:e2e` je ruční výčet 13 souborů, ale v `tests/` jich je 38:
+      # 118 ze 164 testů se tedy nikdy nespustí (docs/audit-testu-a-ci.md,
+      # nález 1). Nejsou vyřazené schválně — jen se do výčtu nikdy nedopsaly.
+      #
+      # Než je půjde zapojit, musí se vědět, kolik z nich vůbec prochází.
+      # Zapnout je naslepo by znamenalo trvale červené CI, a na červenou se
+      # přestane koukat — to je horší než dnešek.
+      #
+      # Proto `continue-on-error`: tenhle krok NIC neblokuje, jen měří.
+      # Jen na masteru a jen chromium, aby to nezdržovalo každý PR.
+      #
+      # Bez výčtu souborů schválně: testDir je `./tests` a android si projekty
+      # pro prohlížeče ignorují samy, takže `playwright test` vezme všechno.
+      # Čtvrtý ruční seznam téhož by byl přesně ta vada, kterou audit vytýká.
+      - name: Změřit i testy, které v CI neběží
+        if: always() && github.ref == 'refs/heads/master'
+        continue-on-error: true
+        env:
+          FRONTEND_URL: ${{ secrets.FRONTEND_URL || 'https://nexus-sync-8d50b.web.app' }}
+        run: |
+          # Reportér i výstupní adresář se přepisují na příkazové řádce, ne
+          # proměnnou prostředí. `playwright.config.js` má u json reportéru
+          # pevné `outputFile: test-results/playwright-results.json`, které má
+          # před PLAYWRIGHT_JSON_OUTPUT_NAME přednost — měření by tedy přepsalo
+          # report hlavního běhu, a to ještě PŘED tím, než se nahraje jako
+          # artefakt. V artefaktu by pak byly výsledky měření místo toho, co
+          # se po spadlém testu hledá.
+          #
+          # `--reporter=json` z příkazové řádky nahradí reportéry z konfigurace
+          # celé, takže JSON jde na stdout a odsud do vlastního souboru.
+          # `--output` odděluje i trasy a snímky.
+          #
+          # `--retries=0` schválně: zajímá mě, co projde napoprvé. Opakování
+          # by nestabilní testy schovalo mezi zelené, a to je přesně ten údaj,
+          # kvůli kterému se to měří.
+          npx playwright test --project=chromium --retries=0 \
+            --reporter=json --output=test-results-mereni \
+            > mereni-vse.json 2>/dev/null || true
+
+          node scripts/shrnuti-testu.js \
+            mereni-vse.json \
+            "Měření: všechny E2E testy včetně těch, které CI nespouští" >> "$GITHUB_STEP_SUMMARY"
 
       # Jediná věc, kterou měl zrušený workflow „QA: E2E Testing Suite" a tenhle
       # job ne. Bez reportu zbývá po spadlém testu jen řádek v logu — žádná

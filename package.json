@@ -39,7 +39,6 @@
     "test:profiles:manage": "npx playwright test tests/profile_management.spec.js",
     "test:all:e2e": "npx playwright test tests/safety_guard.spec.js tests/inventory_ops.spec.js tests/operator_chat.spec.js tests/profile_management.spec.js tests/private_gallery.spec.js tests/settings.spec.js tests/smoke.spec.js tests/dashboard.spec.js tests/mobile_navigation.spec.js tests/sidebar_profiles.spec.js tests/owner_context.spec.js tests/data_transparency.spec.js tests/qa_review.spec.js",
     "test:pilot": "npm run build:client && npm run test:api && npm run test:all:e2e && npm run test:stripe",
-    "test:summary": "node scripts/summarize-tests.js",
     "test:android:native": "npx playwright test tests/android/native_app_smoke.spec.js --config=playwright.android.config.js",
     "test:android:prod": "export NODE_ENV=production && npx playwright test tests/android/native_app_smoke.spec.js --config=playwright.android.config.js",
     "android:sync": "cd client && npx cap sync android",
