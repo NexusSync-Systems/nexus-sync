@@ -1,5 +1,31 @@
 # Antigravity Integration - Setup Guide
 
+> ## ⚠️ Webhook listener byl odstraněn (5. 11. 2026)
+>
+> Všechno, co tenhle návod říká o `scripts/antigravity-webhook.js`, o portu
+> 3001, o `ANTIGRAVITY_WEBHOOK_SECRET` a o „Configure Webhook in Antigravity",
+> **už neplatí a nespouštějte to.** Ten soubor v repozitáři není.
+>
+> Důvod: jeho obsluha události `TASK_REQUEST` brala `command` přímo z těla
+> HTTP požadavku a volala `spawn(command, args, { shell: true })`. Kontrola
+> tajemství byla `if (WEBHOOK_SECRET && token !== WEBHOOK_SECRET)`, takže
+> **když se secret nenastavil, neověřovalo se nic** — a návod níž vás vede
+> k tomu pustit to pod pm2. Byl to tedy recept na spuštění libovolného
+> příkazu kýmkoli, kdo se dostane na ten port. **Repozitář je veřejný.**
+>
+> Nastavené to nikdy nebylo (`.antigravity.env.example` má pořád
+> `demo-key-will-be-updated`), od 5. 4. 2026 se ten soubor nezměnil a nic
+> v CI ho nevolalo. Obsluha `DEPLOYMENT_REQUEST` navíc spouštěla
+> `npm run deploy`, což je skript, který v `package.json` **neexistuje**.
+>
+> **Co platí dál:** `scripts/antigravity-sync.js` a npm skripty
+> `build:with-sync`, `test:with-sync`, `deploy:with-sync`. Ty jen hlásí stav
+> úloh přes HTTPS, žádný příkaz z vnějšku nepřijímají.
+>
+> Pokud tu zpětnou vazbu z Antigravity opravdu chcete, musí se napsat znovu:
+> bez `shell: true`, s povoleným seznamem příkazů místo `command` z požadavku
+> a s odmítnutím startu, dokud secret není nastavený.
+
 ## 🚀 Quick Start (5 minutes)
 
 ### 1. Set Environment Variables
