@@ -1,11 +1,17 @@
 const prisma = require('../services/db');
+const { povoleneProfily, smiNaProfil } = require('../utils/rozsahProfilu');
 
 exports.getChats = async (req, res) => {
   try {
     const { role, agencyId } = req.user;
     const isAppOwner = role?.isAppOwner;
     if (isAppOwner) return res.status(403).json({ message: 'App Owner cannot access messages' });
-    const whereClause = { agencyId };
+    // Operátorka vidí jen chaty svých přiřazených modelek; manažerce
+    // se `povoleneProfily` vrátí null a seznam se nezužuje.
+    const povolene = await povoleneProfily(req.user);
+    const whereClause = povolene === null
+      ? { agencyId }
+      : { agencyId, profileId: { in: povolene } };
     const chats = await prisma.chat.findMany({
       where: whereClause,
       include: { 
@@ -37,6 +43,10 @@ exports.getProfileChats = async (req, res) => {
     const profile = await prisma.profile.findUnique({ where: { id: profileId }, select: { agencyId: true } });
     if (!profile || profile.agencyId !== agencyId) {
       return res.status(403).json({ message: 'Access denied: profile does not belong to your agency' });
+    }
+
+    if (!(await smiNaProfil(req.user, profileId))) {
+      return res.status(403).json({ message: 'Access denied: profile not assigned to you' });
     }
 
     const whereClause = { profileId, agencyId };
