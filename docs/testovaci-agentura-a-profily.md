@@ -50,11 +50,20 @@ node scripts/nachystej-testovaci-agenturu.js --ano
 
 Bez přepínače `--ano` jen vypíše, co by udělal, a skončí. Heslo se bere ze
 souboru, takže se neobjeví v historii příkazů ani ve výpisu procesů; hesla
-operátorek se vygenerují a uloží do `~/nexus-testovaci-ucty.txt` s právy 600,
+operátorek se vygenerují a připíší do `~/nexus-testovaci-ucty.txt` s právy 600,
 ne na obrazovku.
 
-Dá se pustit znovu — když agentura s tím e-mailem existuje, registrace se
-přeskočí a doplní se zbytek.
+**Pravidla hesla: aspoň 8 znaků, velké písmeno, malé písmeno a číslice.**
+Malé písmeno nevyžaduje `validatePassword` v kontroleru, ale zod schéma
+`strongPassword`, které běží před ním — bez něj server vrátí 400.
+
+Dá se pustit znovu: agentura i účty se přeskočí (server hlídá unikátní e-mail)
+a profily se přeskakují podle jména, protože `Profile` v databázi unikátní
+omezení nemá a jinak by vznikly duplicity.
+
+**Pojistka:** po přihlášení skript ověří, že je opravdu v agentuře, kterou
+čeká. Kdyby nakonfigurovaný e-mail patřil skutečnému účtu, jinak by do jeho
+ostré agentury v tichosti nasypal testovací účty a profily.
 
 **Spouští to člověk.** Zakládání účtů na ostrém serveru je rozhodnutí někoho,
 kdo za ten server odpovídá.
