@@ -95,3 +95,6 @@ bugreport-*.zip
 client/android/*.mp4
 /patch.diff
 *.class
+
+# user uploads (never commit)
+server/uploads/
