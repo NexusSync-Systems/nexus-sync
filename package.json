@@ -37,7 +37,7 @@
     "test:inventory": "npx playwright test tests/inventory_ops.spec.js",
     "test:chat": "npx playwright test tests/operator_chat.spec.js",
     "test:profiles:manage": "npx playwright test tests/profile_management.spec.js",
-    "test:all:e2e": "npx playwright test tests/safety_guard.spec.js tests/inventory_ops.spec.js tests/operator_chat.spec.js tests/profile_management.spec.js tests/private_gallery.spec.js tests/settings.spec.js tests/smoke.spec.js tests/dashboard.spec.js tests/mobile_navigation.spec.js tests/sidebar_profiles.spec.js tests/owner_context.spec.js tests/data_transparency.spec.js tests/qa_review.spec.js",
+    "test:all:e2e": "npx playwright test --project=chromium --grep-invert @nahravka",
     "test:pilot": "npm run build:client && npm run test:api && npm run test:all:e2e && npm run test:stripe",
     "test:android:native": "npx playwright test tests/android/native_app_smoke.spec.js --config=playwright.android.config.js",
     "test:android:prod": "export NODE_ENV=production && npx playwright test tests/android/native_app_smoke.spec.js --config=playwright.android.config.js",
@@ -46,7 +46,9 @@
     "emulator:start": "~/Library/Android/sdk/emulator/emulator -avd",
     "build:android:apk": "npm run version:bump && cd client && VITE_APP_VARIANT=relay npm run build && cp dist/index.relay.html dist/index.html && npx cap sync android && cd android && ./gradlew assembleNexusRelayDebug",
     "build:android:full": "npm run version:bump && cd client && npm run build && npx cap sync android && cd android && ./gradlew assembleNexusFullDebug 2>/dev/null || ./gradlew assembleDebug",
-    "test:report": "npx playwright show-report"
+    "test:report": "npx playwright show-report",
+    "test:e2e:matice": "npx playwright test --grep-invert @nahravka",
+    "test:nahravka": "npx playwright test --grep @nahravka --project=chromium"
   },
   "dependencies": {
     "axios": "^1.7.9"
