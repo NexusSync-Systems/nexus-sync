@@ -267,12 +267,28 @@ jobs:
           cache: 'npm'
           cache-dependency-path: client/package-lock.json
 
+      # Klíč se počítá z KOŘENOVÉHO lockfilu, protože `@playwright/test` je
+      # kořenová devDependency. Dřív se hashoval `client/package-lock.json`,
+      # kde Playwright vůbec není — takže každá změna klientské závislosti
+      # zahodila 450 MB prohlížečů, a naopak změna verze Playwrightu cache
+      # nezneplatnila.
+      #
+      # Stálo to nasazení: 5. 11. 2026 zvedl #172 eslint v klientovi, tím se
+      # změnil `client/package-lock.json`, cache minula, stahovaly se všechny
+      # tři prohlížeče od začátku, instalace přešla patnáctiminutový limit,
+      # `e2e-tests` spadly a `deploy-backend` se PŘESKOČIL. Bezpečnostní
+      # oprava z #170 se proto na server nedostala.
+      #
+      # `restore-keys` je tu proto, aby ani miss neznamenal studený start:
+      # vezme se poslední cache se stejným prefixem a doplní se jen rozdíl.
       - name: Cache Playwright Browsers
         id: cache-playwright
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('client/package-lock.json') }}
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
 
       - name: Install dependencies
         run: |
@@ -287,12 +303,27 @@ jobs:
       # jen „timed out". S limitem tady spadne krok, který za to může, a je
       # z běhu poznat, že šlo o stahování, ne o regresi.
       #
-      # Instalují se VŠECHNY prohlížeče schválně: test:all:e2e nemá
-      # --project, takže běží i firefox a webkit (viz playwright.config.js).
-      # Zúžit instalaci na chromium by ty dva projekty shodilo.
+      # Instaluje se jen to, co se v tomhle běhu opravdu spustí.
+      #
+      # Komentář tady do 5. 11. 2026 tvrdil, že se instalují všechny
+      # prohlížeče schválně, protože `test:all:e2e` nemá `--project`. To
+      # přestalo platit v #167: dnes je to
+      # `npx playwright test --project=chromium --grep-invert @nahravka`.
+      # V bráně tedy žádný firefox ani webkit nenastartuje —
+      # `test:api` je taky `--project=chromium` a krok měření si bere
+      # `--project=chromium`, dokud není `plne_mereni`. Projekt `mobile` jede
+      # na Pixelu 5, což je pořád chromium.
+      #
+      # Stahovat a apt-instalovat webkit (gstreamer, libwoff, libopus…)
+      # a firefox pro každý PR byla tedy jen práce navíc — a právě ta se
+      # nevešla do limitu.
+      #
+      # Seznam je vypsaný i pro plnou matici: `A && '' || 'chromium'` by
+      # nefungovalo, protože prázdný řetězec je ve výrazech GitHubu nepravda,
+      # takže by plná matice taky dostala jen chromium.
       - name: Install Playwright Browsers and system dependencies
         timeout-minutes: 15
-        run: npx playwright install --with-deps
+        run: npx playwright install --with-deps ${{ ((github.event_name == 'workflow_dispatch' && inputs.plne_mereni) || github.event_name == 'schedule') && 'chromium firefox webkit' || 'chromium' }}
 
       # BEZ TOHOHLE KROKU TESTUJE CI NASAZENOU PRODUKCI, NE TENHLE PR.
       #
