@@ -381,15 +381,20 @@ jobs:
           # celé, takže JSON jde na stdout a odsud do vlastního souboru.
           # `--output` odděluje i trasy a snímky.
           #
+          # Výsledek jde do `test-results/`, protože ten adresář se nahrává
+          # jako artefakt. V kořeni repozitáře by zůstal jen v souhrnu úlohy,
+          # a ten se přes API přečíst nedá — tedy měření, ke kterému se nikdo
+          # jiný než člověk s prohlížečem nedostane.
+          #
           # `--retries=0` schválně: zajímá mě, co projde napoprvé. Opakování
           # by nestabilní testy schovalo mezi zelené, a to je přesně ten údaj,
           # kvůli kterému se to měří.
           npx playwright test --project=chromium --retries=0 \
             --reporter=json --output=test-results-mereni \
-            > mereni-vse.json 2>/dev/null || true
+            > test-results/mereni-vse.json 2>/dev/null || true
 
           node scripts/shrnuti-testu.js \
-            mereni-vse.json \
+            test-results/mereni-vse.json \
             "Měření: všechny E2E testy včetně těch, které CI nespouští" >> "$GITHUB_STEP_SUMMARY"
 
       # Jediná věc, kterou měl zrušený workflow „QA: E2E Testing Suite" a tenhle
