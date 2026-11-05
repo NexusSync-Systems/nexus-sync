@@ -12,6 +12,20 @@ on:
         type: boolean
         default: false
 
+  # ── Týdenní měření přes všechny prohlížeče ────────────────────────────────
+  #
+  # Brána pouští všechny specifikace, ale jen na chromiu, aby se každý PR
+  # nezdržel. Měřeno 5. 11. 2026: plná matice trvá 41 minut proti 8–11
+  # u chromia, a `deploy-backend` na té úloze visí — zapnout ji do brány by
+  # odložilo každé nasazení o půl hodiny. To by skončilo stejně jako ruční
+  # výčet, který tahle změna ruší: někdo by to zase zúžil.
+  #
+  # Pokrytí přes prohlížeče se proto přesouvá sem. Žádné nasazení se přitom
+  # nespustí — všechny nasazovací úlohy chtějí `push` nebo `workflow_dispatch`,
+  # a `schedule` není ani jedno. Ověřeno nad podmínkami všech 14 úloh.
+  schedule:
+    - cron: '13 3 * * 1'   # pondělí 3:13 UTC, mimo špičku i mimo :00
+
 # Cancel any in-progress run for the same branch when a new push arrives
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -193,7 +207,7 @@ jobs:
     # 172 testy se do 25 minut nevejde. Limit ÚLOHY ji zruší a `continue-on-error`
     # na kroku proti tomu nechrání — výsledkem by byla zabitá úloha, nespuštěný
     # souhrn a ŽÁDNÉ měření, tedy přesný opak záměru.
-    timeout-minutes: ${{ (github.event_name == 'workflow_dispatch' && inputs.plne_mereni) && 90 || 25 }}
+    timeout-minutes: ${{ ((github.event_name == 'workflow_dispatch' && inputs.plne_mereni) || github.event_name == 'schedule') && 90 || 25 }}
 
     # Backend si zvedáme vlastní, zahazovací.
     #
@@ -374,11 +388,11 @@ jobs:
       # pro prohlížeče ignorují samy, takže `playwright test` vezme všechno.
       # Čtvrtý ruční seznam téhož by byl přesně ta vada, kterou audit vytýká.
       - name: Změřit i testy, které v CI neběží
-        if: always() && (github.ref == 'refs/heads/master' || inputs.plne_mereni)
+        if: always() && (github.ref == 'refs/heads/master' || inputs.plne_mereni || github.event_name == 'schedule')
         continue-on-error: true
         env:
           FRONTEND_URL: ${{ secrets.FRONTEND_URL || 'https://nexus-sync-8d50b.web.app' }}
-          PLNE_MERENI: ${{ inputs.plne_mereni }}
+          PLNE_MERENI: ${{ inputs.plne_mereni || github.event_name == 'schedule' }}
         run: |
           # Reportér i výstupní adresář se přepisují na příkazové řádce, ne
           # proměnnou prostředí. `playwright.config.js` má u json reportéru
@@ -414,14 +428,19 @@ jobs:
           # padala VÝHRADNĚ na WebKitu (blokovaný smíšený obsah). Chromium ji
           # nechytilo.
           #
-          # Plné měření se proto pouští ručně přes „Run workflow" s volbou
-          # `plne_mereni`.
+          # Plná matice běží ve dvou případech:
           #
-          # SPOUŠTĚJ HO Z VĚTVE, NE Z MASTERU. Nasazovací úlohy mají
-          # v podmínce `github.ref == 'refs/heads/master'` spolu s
-          # `workflow_dispatch`, takže dispatch z masteru by nasazení spustil
-          # a čekal by na tuhle úlohu — tedy hodina zdržení. Z větve se
-          # nasazení přeskočí a měření nikomu nepřekáží.
+          #   - KAŽDÉ PONDĚLÍ automaticky (`schedule`). Nasazení se přitom
+          #     nespustí, protože všechny nasazovací úlohy chtějí `push`
+          #     nebo `workflow_dispatch`.
+          #   - RUČNĚ přes „Run workflow" s volbou `plne_mereni`, když je
+          #     potřeba výsledek dřív.
+          #
+          # RUČNÍ SPOUŠTĚJ Z VĚTVE, NE Z MASTERU. Nasazovací úlohy mají
+          # v podmínce `github.ref == 'refs/heads/master'` spolu
+          # s `workflow_dispatch`, takže dispatch z masteru by nasazení
+          # spustil a čekal by na tuhle úlohu — tedy hodina zdržení.
+          # U `schedule` tenhle problém není.
           if [ "${PLNE_MERENI:-false}" = "true" ]; then
             echo "Měření přes VŠECHNY prohlížeče (ruční spuštění)."
             PROJEKTY=""
