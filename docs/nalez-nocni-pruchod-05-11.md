@@ -122,3 +122,38 @@ Není to prověřené a nemá se to tak brát:
 - obrazovky relaye kromě hlavní (Číselník, Zprávy)
 - odesílání SMS z telefonu ven (nechtěl jsem posílat skutečné zprávy
   na cizí čísla)
+
+---
+
+## Dodatek: plošný oťuk API pod rolí operátorky
+
+Třicet GET endpointů jejím vlastním tokenem. Jen čtení, nic se nezapisovalo.
+
+**Projde (200) — 16 endpointů:**
+`/agency/settings`, `/agency/relay-status`, `/profiles`, `/chats`,
+`/bookings`, `/clients`, `/blacklist`, `/trackers`, `/sos/active`,
+`/team-chat/messages`, `/referrals/stats`, `/subscriptions/current`,
+`/sip/config`, `/salon-keys`, `/emergencies`, `/device/bindings`
+
+**Odmítnuto (403) — 7 endpointů:**
+`/agency/stats`, `/audit-logs`, `/qa/reviews`, `/trunks`,
+`/analytics/summary`, `/developer/keys`, `/admin/features`
+
+Tohle vypadá **správně** — jsou to věci pro manažerku a výš. Problém není
+403 sama o sobě, ale že jedna z nich (`/agency/stats`) shazovala celé
+načtení; to řeší #180.
+
+**Vrátilo 404 — 7 cest:** `/inventory`, `/notes`, `/safety/sessions`,
+`/payouts`, `/billing/invoices`, `/calls`, `/ai/suggestions`.
+**Neberte to jako nález.** Ty cesty jsem odhadl podle názvů modulů a
+nejspíš jsem minul skutečné podcesty. Ověřené to není.
+
+### Co z toho plyne k rozsahu operátorky
+
+`/profiles` jí vrací **tři modelky**, ačkoli nemá přiřazenou ani jednu —
+tedy přesně to, co opravuje #179, zatím na produkci platí.
+
+Stejnou otázku si zaslouží `/clients` a `/blacklist`: obojí operátorce
+projde a obojí je dnes omezené nejspíš jen agenturou. Do #179 jsem je
+nezahrnul, protože vaše pravidlo mluvilo o chatech a modelkách —
+jestli má platit i na klienty, je to další místo.
