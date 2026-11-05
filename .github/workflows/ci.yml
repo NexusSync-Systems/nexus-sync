@@ -519,6 +519,21 @@ jobs:
       - name: Install client dependencies
         run: cd client && npm install --legacy-peer-deps --prefer-offline --no-audit
 
+      # Bez tohohle si Gradle tahá celý strom závislostí z Maven Central a
+      # z GitHub releases při KAŽDÉM běhu. 5. 11. 2026 to shodilo kontrolu
+      # na PR #170: `kotlin-compiler-embeddable-2.2.10.jar` vrátil 504 Gateway
+      # Time-out a celá úloha skončila chybou, přitom na repozitáři se nic
+      # nezměnilo. Úloha `build-android` ten cache má od začátku; tady chyběl.
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('client/android/**/*.gradle*', 'client/android/**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
       # Tady se adresa backendu záměrně NEnastavuje: tahle úloha staví web
       # jen proto, aby šly sloučit manifesty, a na ty API adresa nemá vliv.
       # Kontrola patří do build-android, kde se APK skutečně vyrábí.
