@@ -256,7 +256,6 @@ const RelayMode = ({ operator, t, onHide: _onHide, onExit, syncPushToken, isSync
 
   const { isDefaultSmsApp: _isDefaultSmsApp, requestDefaultSmsApp: _requestDefaultSmsApp, incomingSms, clearIncomingSms, sendSms, configureRelay } = useSmsRelay({
     onIncoming: (sms) => addLocalLog('sms', sms.from, 'Příchozí SMS (GSM)', 'inbound', 'completed'),
-    socket: nexus.socket
   });
 
   useEffect(() => {

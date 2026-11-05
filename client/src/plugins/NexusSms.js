@@ -35,15 +35,16 @@ export const isRelayVariant = APP_VARIANT === 'relay';
  *   - Může zjistit/nastavit výchozí SMS aplikaci
  *
  * V nexusFull APK / prohlížeči:
- *   - Naslouchá Socket.IO události 'sms:incoming' ze serveru
- *   - Zobrazuje přeposlané SMS operátorce
+ *   - Příchozí SMS sem NEPŘICHÁZEJÍ přes tento hook. Relay je posílá nativně
+ *     na POST /api/device/relay, server je uloží jako Message(INBOUND)
+ *     a rozešle událost `new_message`, kterou konzumuje chat. Hook `useSmsRelay`
+ *     tady slouží jen k odesílání.
  *
  * @param {Object} options
  * @param {Function} options.onIncoming - callback (sms: {from, body, timestamp})
- * @param {Object} options.socket - Socket.IO instance (pro nexusFull)
  * @param {String} options.API_BASE - Base URL for API requests
  */
-export function useSmsRelay({ onIncoming, socket, API_BASE } = {}) {
+export function useSmsRelay({ onIncoming, API_BASE } = {}) {
   const [isDefaultSmsApp, setIsDefaultSmsApp] = useState(false);
   const [incomingSms, setIncomingSms]         = useState(null);
   const onIncomingRef = useRef(onIncoming);
@@ -74,24 +75,10 @@ export function useSmsRelay({ onIncoming, socket, API_BASE } = {}) {
     return () => { listener?.remove?.(); };
   }, [API_BASE]);
 
-  // ── nexusFull varianta: přeposlané SMS ze serveru přes Socket.IO ──────────
-  useEffect(() => {
-    if (isRelayVariant || !socket) return;
-
-    const handler = (data) => {
-      const sms = {
-        from:      data.from || data.sender || 'Relay',
-        body:      data.body || data.message || '',
-        timestamp: data.timestamp || Date.now(),
-        relayId:   data.installationId,
-      };
-      setIncomingSms(sms);
-      onIncomingRef.current?.(sms);
-    };
-
-    socket.on('sms:incoming', handler);
-    return () => { socket.off('sms:incoming', handler); };
-  }, [socket]);
+  // Posluchač `sms:incoming` tu byl odstraněný spolu se serverovou route
+  // POST /api/sms/incoming, která tu událost jako jediná vysílala a kterou
+  // relay nikdy nepoužil. Živá cesta příchozích zpráv jde přes `new_message`
+  // (viz hlavička výš a server/src/controllers/deviceController.js).
 
   const sendSms = async (to, text) => {
     if (isRelayVariant) {
