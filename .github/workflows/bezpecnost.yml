@@ -99,14 +99,43 @@ jobs:
             || { echo "::warning::Gitleaks se nepodařilo stáhnout."; exit 0; }
           tar -xzf gitleaks.tar.gz gitleaks || { echo "::warning::Archiv gitleaks nejde rozbalit."; exit 0; }
 
-          # `--redact` je tady POVINNÉ, ne volitelné: logy běhů veřejného
+          # ── Proč to není prostě „prohledej celou historii" ──────────────
+          #
+          # První pokus tohle dělal a RUNNERU DOŠLA PAMĚŤ — běh byl zabit po
+          # 3 minutách 51 vteřinách, ne vyčerpáním časového limitu.
+          #
+          # Důvod: v historii tohohle repozitáře leží commitnutá npm cache.
+          # `git count-objects` hlásí 345 MB a mezi největšími objekty jsou
+          # balíky po 64, 41 a 36 MB plus 34MB client/lint_results.txt.
+          # Gitleaks je zkoušel dekódovat všechny.
+          #
+          # `--max-target-megabytes 5` proto velké soubory přeskakuje. Tajemství
+          # se do šedesátimegabajtového archivu balíčku nepíšou.
+          #
+          # A historie se znovu neprohledává při každém PR. Staré commity se
+          # nemění, takže opakovaný průchod 1 409 commity je jen placený čas:
+          #
+          #   - v PR   → jen pracovní strom (--no-git), rychlé a ohraničené
+          #   - master → celá historie, kde na to je prostor
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            ROZSAH="--no-git"
+            echo "Režim: jen pracovní strom (PR)."
+          else
+            ROZSAH=""
+            echo "Režim: celá historie (master)."
+          fi
+
+          # `--redact` je POVINNÉ, ne volitelné: logy běhů veřejného
           # repozitáře vidí kdokoli. Bez toho by nástroj na hledání tajemství
           # sám tajemství zveřejnil.
           #
           # `--exit-code 0`: o tom, jestli běh spadne, rozhoduje workflow,
           # ne nástroj.
+          # shellcheck disable=SC2086
           ./gitleaks detect \
             --source . \
+            $ROZSAH \
+            --max-target-megabytes 5 \
             --redact \
             --report-format json \
             --report-path vysledky/gitleaks.json \
@@ -149,12 +178,18 @@ jobs:
 
       # Podrobnosti k nálezům. Hodnoty tajemství jsou díky `--redact`
       # začerněné i tady.
+      # `if-no-files-found: warn` a `continue-on-error`: kdyby ani jedna
+      # kontrola nic nevyprodukovala, nahrávání artefaktu by samo shodilo
+      # úlohu — a v souhrnu by přitom stálo srozumitelné „nedoběhlo".
+      # Diagnostika má být ve shrnutí, ne v pádu kroku, který jen ukládá.
       - name: Uložit podrobné výsledky
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: bezpecnostni-kontrola
           path: vysledky/
+          if-no-files-found: warn
           retention-days: 14
 
       # ── Zatím NEBLOKUJE, a je to záměr ──────────────────────────────────
