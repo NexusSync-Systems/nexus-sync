@@ -69,7 +69,6 @@ router.get('/profiles', requireScope('read:profiles'), async (req, res) => {
       select: {
         id: true,
         name: true,
-        displayName: true,
         status: true,
         createdAt: true
       }
