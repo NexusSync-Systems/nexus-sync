@@ -81,6 +81,9 @@ exports.syncChatHistory = async (req, res) => {
 
     if (!chat) return res.status(404).json({ message: 'Chat not found' });
     if (chat.agencyId !== agencyId) return res.status(403).json({ message: 'Access denied' });
+    if (!(await smiNaProfil(req.user, chat.profileId))) {
+      return res.status(403).json({ message: 'Access denied: profile not assigned to you' });
+    }
 
     // Send command via Socket for speed
     try {

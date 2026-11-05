@@ -154,6 +154,9 @@ exports.simulateInbound = async (req, res) => {
     const profile = await prisma.profile.findUnique({ where: { id: profileId } });
     if (!profile) return res.status(404).json({ message: 'Profile not found' });
     if (profile.agencyId !== agencyId) return res.status(403).json({ message: 'Access denied' });
+    if (!(await smiNaProfil(req.user, profileId))) {
+      return res.status(403).json({ message: 'Access denied: profile not assigned to you' });
+    }
     const normalizedExternalId = normalizePhoneNumber(externalId, { referenceNumber: profile.phoneNumber });
     const phoneVariants = getPhoneLookupValues(externalId, { referenceNumber: profile.phoneNumber });
     let chat = await prisma.chat.findFirst({
