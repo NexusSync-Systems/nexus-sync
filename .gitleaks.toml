@@ -1,0 +1,63 @@
+# Výjimky pro gitleaks.
+#
+# PROČ EXISTUJE: bez vyloučených planých poplachů se kontrola nedá zapnout jako
+# blokující — a kontrola, která je červená pořád, je kontrola, na kterou se za
+# týden přestane koukat. Tenhle soubor je tedy podmínka toho, aby hlídání
+# tajemství něco znamenalo.
+#
+# TENHLE SOUBOR ŘEŠÍ PRACOVNÍ STROM (režim PR, `--no-git`): 19 nálezů, z toho
+# 15 testovacích přípravků, 2 zahazovací hodnoty CI a 2 klíče Firebase.
+#
+# HISTORII řeší `.gitleaksignore` vedle, a to po jednotlivých nálezech. Těch je
+# 12 a jsou to jiné nálezy než těchhle 19 — první odhad je zaměňoval, protože
+# vznikl nad pracovním stromem, zatímco master prochází celou historii.
+#
+# PRAVIDLO PRO ÚPRAVY: výjimka se přidává na konkrétní cestu nebo konkrétní
+# vzorek, nikdy na celý adresář „pro jistotu". Každá musí mít napsané, proč
+# ten nález není skutečný. Výjimka bez odůvodnění je tiché vypnutí kontroly.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Testovací přípravky a zahazovací hodnoty CI — rozebráno 5. 11. 2026"
+
+paths = [
+  # Přípravky jednotkových testů. Nalezeno 15 z 19: `sk_test_conf…`
+  # v billing.test.js a monitoring.test.js (Stripe klíče v TESTOVACÍM režimu,
+  # syntetické) a řetězce typu `test-jwt-secret-that-is-at-least-32-chars-long`
+  # v setup.js a socketAuth.test.js.
+  #
+  # Vědomý kompromis: skutečné tajemství omylem vložené do testu by se tím
+  # skrylo. Protiváhou je `npm run security:secrets`, který běží jako první
+  # krok úlohy Lint & Test, prohlíží pracovní strom a má vlastní rozpoznávání
+  # zástupných hodnot.
+  '''^server/tests/''',
+
+  # Klíče Firebase pro Android. Nalezeno 2 z 19.
+  #
+  # Tyhle klíče PATŘÍ do aplikace — vytáhne si je každý, kdo si stáhne APK,
+  # a je to tak navržené. Nejsou to tajemství v tom smyslu, jako je API secret.
+  #
+  # ALE: musí být omezené v konzoli Google Cloud na název balíčku
+  # (com.nexushub.app, com.nexushub.relay) a podpisový otisk. Bez toho je může
+  # použít kdokoli odkudkoli — a u veřejného repozitáře je to o to snazší.
+  # Viz docs/jak-neprijit-o-server.md.
+  '''^client/android/app/google-services\.json$''',
+]
+
+regexes = [
+  # Zahazovací hodnoty pro efemérní databázi v CI, obě
+  # v .github/workflows/ci.yml.
+  #
+  # Schválně vzorek, ne cesta: kdyby se do toho souboru někdy dostalo
+  # SKUTEČNÉ tajemství, musí ho kontrola pořád najít. Vyloučení celého
+  # ci.yml by tuhle možnost zavřelo.
+  #
+  # A schválně UKOTVENÝ a úplný, ne `ci-e2e-[a-z0-9-]+`. Ten by byl
+  # celorepozitářový vzorek na hodnotu nálezu, takže by stačilo pojmenovat
+  # skutečné tajemství předponou `ci-e2e-` a bylo by navždy tiše skryté.
+  # Tady jsou vypsané přesně ty dvě hodnoty, které existují.
+  '''^ci-e2e-jwt-secret-nejmene-32-znaku-dlouhy$''',
+  '''^ci-e2e-encryption-key-nejmene-32-znaku$''',
+]

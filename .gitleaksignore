@@ -1,0 +1,54 @@
+# Jednotlivé známé nálezy v historii, které se nemají hlásit znovu.
+#
+# PROČ TENHLE SOUBOR A NE VÝJIMKA NA CESTU V .gitleaks.toml:
+# výjimka na cestu skryje i BUDOUCÍ skutečné tajemství na tom místě. Řádek tady
+# skryje jeden konkrétní nález v jednom konkrétním commitu a nic jiného.
+# U historie, do které se jen přidává, je to přesnější i bezpečnější.
+#
+# Formát je `commit:cesta:pravidlo:řádek` — žádné hodnoty tajemství, takže se
+# tenhle soubor dá mít i ve veřejném repozitáři.
+#
+# ── Co tomu předcházelo (5. 11. 2026) ──────────────────────────────────────
+#
+# První odhad výchozího stavu byl 19 nálezů. Byl špatně: naměřil se nad
+# PRACOVNÍM STROMEM, zatímco na masteru gitleaks prochází celou historii.
+# Skutečné číslo, které uvidí CI, je 12.
+#
+# (Jiný sken hlásil 46. I to bylo zavádějící — 34 z nich bylo dosažitelných
+# jen přes refy privátního zrcadla `nexus-backend`, ne z veřejného repozitáře.
+# Mezi nimi i `firebase-auth.json` s privátním klíčem servisního účtu Firebase,
+# který ve VEŘEJNÉM repozitáři není. Ověřeno proti všem refs/remotes/origin/.)
+#
+# ── Prověřeno, než se to sem napsalo ───────────────────────────────────────
+#
+# Šest nálezů níž jsou skutečné zadrátované hodnoty ze starého kódu, ne
+# zástupné texty. Proto se u každé ověřilo, jestli neodpovídá něčemu, co se
+# POUŽÍVÁ DNES: porovnáním otisků proti všem 14 hodnotám v `.env` na serveru.
+# Žádná shoda. Současný kód je navíc čistý — RelayMode.jsx dnes bere secret
+# z `tokenStore.getRelaySecret()`, natvrdo tam není nic.
+#
+# Kdyby se někdy ukázalo, že některá z nich přece jen platí, správná reakce
+# je ROTACE, ne řádek v tomhle souboru. Smazat se z historie veřejného
+# repozitáře už nedají.
+
+# ── Commitnutá npm cache (6 nálezů) ────────────────────────────────────────
+# Obsah balíčků a jejich metadata. `private-key` v nich je zkušební materiál
+# z nějakého npm balíčku. Tahle cache je taky důvod, proč má repozitář 345 MB.
+2057f784d333b736efdaad635eb4109e04d28114:server/.npm-local/_cacache/content-v2/sha512/0a/da/9af5d7c3ee1ddd61b868866f96f9f7718f76e1384fbfefd881114c6d3a867db7bf825e751bf7b2327cecc0394b3aa00573c336226435afa044b5032603c5:private-key:1
+2057f784d333b736efdaad635eb4109e04d28114:server/.npm-local/_cacache/content-v2/sha512/98/98/4ce4a720d31487ebea9fc8216bb64c3dca3e9c9757e4855e98c8cf4ba084afb7f51fd5a7cafd4d8926be440216a67d5f7a58556db9776889ac6f72227507:generic-api-key:1
+395f08bfec2a85d60e674d60e489a48a84ed1a63:.npm-local/_cacache/content-v2/sha512/0a/da/9af5d7c3ee1ddd61b868866f96f9f7718f76e1384fbfefd881114c6d3a867db7bf825e751bf7b2327cecc0394b3aa00573c336226435afa044b5032603c5:private-key:1
+395f08bfec2a85d60e674d60e489a48a84ed1a63:.npm-local/_cacache/content-v2/sha512/98/98/4ce4a720d31487ebea9fc8216bb64c3dca3e9c9757e4855e98c8cf4ba084afb7f51fd5a7cafd4d8926be440216a67d5f7a58556db9776889ac6f72227507:generic-api-key:1
+
+# ── Staré zadrátované hodnoty v klientovi (4 nálezy) ───────────────────────
+# `client/src/App.jsx` a jeho předchůdce `src/App.jsx` (token), dvakrát
+# `RelayMode.jsx` (secret). Ověřeno, že neodpovídají ničemu živému.
+8a5b7d9e33b37931e5876fcdb3738fca7fafba8e:client/src/App.jsx:generic-api-key:1194
+c9aa0f51bd871fb1618b00e87ee232024a91de51:src/App.jsx:generic-api-key:72
+9bcc11790e25b89b889ffddac7374b9480edf9f3:client/src/components/RelayMode.jsx:generic-api-key:580
+9bcc11790e25b89b889ffddac7374b9480edf9f3:client/src/components/RelayMode.jsx:generic-api-key:765
+
+# ── Pomocný skript a log ze zařízení (2 nálezy) ────────────────────────────
+# `scratch/fetch_remote_credentials.js` i `device-logcat.txt` jsou ze stromu
+# dávno pryč. JWT z logu je navíc z března 2026, tedy dávno po expiraci.
+bd2b6149d992b84f4d18dc30bf956e54da1e878c:scratch/fetch_remote_credentials.js:generic-api-key:7
+d3029497d8ab8c330c5350522f487e95de0c57be:client/android/device-logcat.txt:jwt:1141

@@ -85,8 +85,22 @@ jobs:
           done
 
       # ── 2. Tajemství v historii ─────────────────────────────────────────
+      # ── TOHLE UŽ BLOKUJE, na rozdíl od ostatních kontrol ─────────────────
+      #
+      # Ostatní kroky jen měří, protože jejich výchozí stav není uklizený.
+      # U tajemství je od 5. 11. 2026 uklizený: z 19 nálezů bylo 17 planých
+      # poplachů a všechny jsou rozebrané v `.gitleaks.toml`. Zbytek jsou
+      # klíče Firebase, které do aplikace patří.
+      #
+      # Od téhle chvíle tedy každý NOVÝ nález znamená buď skutečné tajemství
+      # v historii, nebo chybějící odůvodněnou výjimku. Obojí je důvod běh
+      # zastavit — tajemství v historii se nedá smazat a každá hodina navíc
+      # je hodina, kdy je venku.
+      #
+      # Taky se nespouští na pozadí: když se nástroj nepodaří stáhnout nebo
+      # spustit, krok SPADNE. Bezpečnostní kontrola, která tiše neproběhla,
+      # je horší než žádná, protože vypadá jako zelená.
       - name: Tajemství v historii gitu
-        continue-on-error: true
         env:
           # Pevná verze: nástroj, který se sám aktualizuje, mění výsledky
           # mezi běhy a pak není poznat, jestli přibyl nález, nebo pravidlo.
@@ -96,8 +110,9 @@ jobs:
           mkdir -p vysledky
           curl -sSfL -o gitleaks.tar.gz \
             "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERZE}/gitleaks_${GITLEAKS_VERZE}_linux_x64.tar.gz" \
-            || { echo "::warning::Gitleaks se nepodařilo stáhnout."; exit 0; }
-          tar -xzf gitleaks.tar.gz gitleaks || { echo "::warning::Archiv gitleaks nejde rozbalit."; exit 0; }
+            || { echo "::error::Gitleaks se nepodařilo stáhnout — kontrola tajemství NEPROBĚHLA."; exit 1; }
+          tar -xzf gitleaks.tar.gz gitleaks \
+            || { echo "::error::Archiv gitleaks nejde rozbalit — kontrola tajemství NEPROBĚHLA."; exit 1; }
 
           # ── Proč to není prostě „prohledej celou historii" ──────────────
           #
@@ -129,17 +144,43 @@ jobs:
           # repozitáře vidí kdokoli. Bez toho by nástroj na hledání tajemství
           # sám tajemství zveřejnil.
           #
-          # `--exit-code 0`: o tom, jestli běh spadne, rozhoduje workflow,
-          # ne nástroj.
+          # `--config .gitleaks.toml` nese odůvodněné výjimky. Každá je tam
+          # vypsaná i s tím, proč ten nález není skutečný.
+          #
+          # `--exit-code 1`: nález teď běh ZASTAVÍ. Viz komentář u kroku výš.
           # shellcheck disable=SC2086
           ./gitleaks detect \
+            --config .gitleaks.toml \
             --source . \
             $ROZSAH \
             --max-target-megabytes 5 \
             --redact \
             --report-format json \
             --report-path vysledky/gitleaks.json \
-            --exit-code 0 || echo "::warning::Gitleaks skončil chybou."
+            --exit-code 1 \
+            || {
+              echo "::error::Gitleaks našel tajemství, nebo skončil chybou. Podrobnosti v artefaktu."
+              echo "Když je nález planý poplach, přidej ho do .gitleaks.toml i s odůvodněním."
+              exit 1
+            }
+
+          # ── Kolik se toho vůbec neprohlédlo ───────────────────────────────
+          #
+          # `--max-target-megabytes 5` velké soubory přeskakuje a NEŘEKNE TO.
+          # Bez tohohle řádku by krok hlásil čisto i ve chvíli, kdy desítky
+          # megabajtů v historii nikdo neotevřel — tedy přesně ten druh
+          # tichého selhání, kvůli kterému tahle úloha vznikla.
+          #
+          # V historii leží commitnutá npm cache s objekty po 64, 41 a 36 MB.
+          # `%(rest)` je nutné: `git rev-list --objects` dává řádky „sha cesta"
+          # a bez něj by `cat-file` bral celý řádek jako jméno objektu, nic
+          # nenašel a tiše hlásil nulu. Ověřeno — první verze přesně tohle dělala.
+          VELKE=$(git rev-list --objects --all 2>/dev/null \
+            | git cat-file --batch-check='%(objecttype) %(objectsize) %(rest)' 2>/dev/null \
+            | awk '$1=="blob" && $2 > 5242880' | wc -l | tr -d ' ')
+          if [ "${VELKE:-0}" -gt 0 ]; then
+            echo "::warning::Kvůli limitu 5 MB se neprohlédlo ${VELKE} objektů v historii. Čistý výsledek platí JEN mimo ně."
+          fi
 
       # ── 3. Statická analýza ─────────────────────────────────────────────
       - name: Statická analýza kódu
@@ -192,18 +233,24 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      # ── Zatím NEBLOKUJE, a je to záměr ──────────────────────────────────
+      # ── Co blokuje a co zatím jen měří ──────────────────────────────────
       #
-      # Tyhle tři nástroje nad tímhle repozitářem nikdy neběžely, takže první
-      # běhy skoro jistě něco najdou — včetně plané poplachy. Kdyby to hned
-      # shazovalo PR, skončí to jedním ze dvou způsobů: buď se kontrola vypne,
-      # nebo se na červenou přestane koukat. Obojí je horší než dnešek.
+      # Tajemství BLOKUJÍ: jejich výchozí stav je rozebraný a odůvodněné
+      # výjimky jsou v `.gitleaks.toml`.
       #
-      # Stejný postup jako u měření testů: nejdřív změřit, pak podle naměřeného
-      # nastavit mez. Až bude výchozí stav známý a uklizený, tenhle krok se
-      # změní na skutečnou bránu.
+      # Závislosti a statická analýza zatím jen MĚŘÍ. Jejich výchozí stav
+      # uklizený není a brána, která je červená pořád, skončí jedním ze dvou
+      # způsobů: buď se vypne, nebo se na červenou přestane koukat.
+      #
+      # Tenhle krok dřív tiskl „úloha záměrně neshazuje" — od chvíle, kdy
+      # tajemství blokují, to byla nepravda na posledním řádku logu, tedy
+      # přesně tam, kam se kouká.
       - name: Verdikt
         if: always()
         run: |
           echo "Kontrola proběhla. Výsledky jsou ve shrnutí úlohy a v artefaktu."
-          echo "Tahle úloha zatím běh ZÁMĚRNĚ neshazuje — viz komentář ve workflow."
+          echo ""
+          echo "BLOKUJE:   tajemství v historii (gitleaks)"
+          echo "jen měří:  zranitelné závislosti, statická analýza"
+          echo ""
+          echo "Zelená u měřicích kroků NENÍ důkaz, že nic nenašly — čísla jsou ve shrnutí."

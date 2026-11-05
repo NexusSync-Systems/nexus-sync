@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [master]
   workflow_dispatch:  # Umožní ruční spuštění z GitHub UI nebo CLI
+    inputs:
+      plne_mereni:
+        description: 'Změřit E2E testy přes VŠECHNY prohlížeče (trvá desítky minut)'
+        type: boolean
+        default: false
 
 # Cancel any in-progress run for the same branch when a new push arrives
 concurrency:
@@ -183,7 +188,12 @@ jobs:
     # a úloha, která se na něčem zasekne, drží runner celé odpoledne, místo
     # aby řekla, že něco není v pořádku. (Stalo se to 4. 8. 2026, kdy testy
     # ještě mířily na produkční API a to přestalo odpovídat.)
-    timeout-minutes: 25
+    #
+    # Při `plne_mereni` je limit vyšší: plná matice přes čtyři prohlížeče nad
+    # 172 testy se do 25 minut nevejde. Limit ÚLOHY ji zruší a `continue-on-error`
+    # na kroku proti tomu nechrání — výsledkem by byla zabitá úloha, nespuštěný
+    # souhrn a ŽÁDNÉ měření, tedy přesný opak záměru.
+    timeout-minutes: ${{ (github.event_name == 'workflow_dispatch' && inputs.plne_mereni) && 90 || 25 }}
 
     # Backend si zvedáme vlastní, zahazovací.
     #
@@ -364,10 +374,11 @@ jobs:
       # pro prohlížeče ignorují samy, takže `playwright test` vezme všechno.
       # Čtvrtý ruční seznam téhož by byl přesně ta vada, kterou audit vytýká.
       - name: Změřit i testy, které v CI neběží
-        if: always() && github.ref == 'refs/heads/master'
+        if: always() && (github.ref == 'refs/heads/master' || inputs.plne_mereni)
         continue-on-error: true
         env:
           FRONTEND_URL: ${{ secrets.FRONTEND_URL || 'https://nexus-sync-8d50b.web.app' }}
+          PLNE_MERENI: ${{ inputs.plne_mereni }}
         run: |
           # Reportér i výstupní adresář se přepisují na příkazové řádce, ne
           # proměnnou prostředí. `playwright.config.js` má u json reportéru
@@ -389,7 +400,38 @@ jobs:
           # `--retries=0` schválně: zajímá mě, co projde napoprvé. Opakování
           # by nestabilní testy schovalo mezi zelené, a to je přesně ten údaj,
           # kvůli kterému se to měří.
-          npx playwright test --project=chromium --retries=0 \
+          #
+          # ── Proč chromium, a kdy všechny prohlížeče ──────────────────────
+          #
+          # Běžně se měří jen na chromiu. Důvod není šetrnost, ale závislosti:
+          # `sync-backend` čeká na `e2e-tests` a `deploy-backend` na něj, takže
+          # delší měření uvnitř téhle úlohy zdrží KAŽDÉ nasazení. Projekty jsou
+          # čtyři (chromium, mobile, firefox, webkit) a 172 testů přes všechny
+          # je řádově desítky minut.
+          #
+          # Jenže chromium samo nestačí na rozhodnutí, co zapnout do bránící
+          # sady: 4. 11. 2026 jsem v tomhle repozitáři vyrobil chybu, která
+          # padala VÝHRADNĚ na WebKitu (blokovaný smíšený obsah). Chromium ji
+          # nechytilo.
+          #
+          # Plné měření se proto pouští ručně přes „Run workflow" s volbou
+          # `plne_mereni`.
+          #
+          # SPOUŠTĚJ HO Z VĚTVE, NE Z MASTERU. Nasazovací úlohy mají
+          # v podmínce `github.ref == 'refs/heads/master'` spolu s
+          # `workflow_dispatch`, takže dispatch z masteru by nasazení spustil
+          # a čekal by na tuhle úlohu — tedy hodina zdržení. Z větve se
+          # nasazení přeskočí a měření nikomu nepřekáží.
+          if [ "${PLNE_MERENI:-false}" = "true" ]; then
+            echo "Měření přes VŠECHNY prohlížeče (ruční spuštění)."
+            PROJEKTY=""
+          else
+            echo "Měření jen na chromiu. Plnou matici spustíš ručně s volbou plne_mereni."
+            PROJEKTY="--project=chromium"
+          fi
+
+          # shellcheck disable=SC2086
+          npx playwright test $PROJEKTY --retries=0 \
             --reporter=json --output=test-results-mereni \
             > test-results/mereni-vse.json 2>/dev/null || true
 
