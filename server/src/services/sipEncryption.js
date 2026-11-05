@@ -27,7 +27,7 @@ function encrypt(plaintext) {
   if (!plaintext) return null;
   const key = getKey();
   const iv  = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+  const cipher = crypto.createCipheriv(ALGORITHM, key, iv, { authTagLength: TAG_LENGTH });
 
   const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
   const tag       = cipher.getAuthTag();
@@ -51,7 +51,16 @@ function decrypt(encoded) {
     const tag        = data.slice(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
     const ciphertext = data.slice(IV_LENGTH + TAG_LENGTH);
 
-    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+    // Délka ověřovací značky se musí vynutit. `slice` sice bere pevné pozice,
+    // ale u zkráceného vstupu vrátí kratší buffer — a Node bez `authTagLength`
+    // přijme u GCM i čtyřbajtovou značku. Padělek by se pak uhodl
+    // s pravděpodobností jedna ku čtyřem miliardám místo jedna ku 2^128.
+    if (tag.length !== TAG_LENGTH) {
+      console.error(`[SIP Encryption] decrypt failed: značka má ${tag.length} B místo ${TAG_LENGTH} B.`);
+      return null;
+    }
+
+    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv, { authTagLength: TAG_LENGTH });
     decipher.setAuthTag(tag);
 
     return decipher.update(ciphertext) + decipher.final('utf8');
