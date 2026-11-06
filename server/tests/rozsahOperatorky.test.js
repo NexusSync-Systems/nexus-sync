@@ -144,6 +144,35 @@ describe('modelka vidí svůj vlastní profil', () => {
     expect(res.status).toBe(200);
   });
 
+  test('do svého chatu smí i PSÁT (rozhodnuto 6. 11. 2026)', async () => {
+    // Modelka má na svůj chat nejen číst, ale i odpovídat. Server to
+    // nerozhoduje podle `role.permissions` — ten JSON se nikde nevynucuje,
+    // čte ho jen roleController pro správu rolí. Rozhoduje přihlášení
+    // a rozsah profilu, a vlastnictví je od #184 jeho součástí.
+    prismaMock.chat.findUnique.mockResolvedValue(chat('chat-moje', MOJE));
+    prismaMock.message.create.mockResolvedValue({ id: 'm-1', chatId: 'chat-moje' });
+    prismaMock.chat.update = jest.fn().mockResolvedValue({});
+
+    const res = await request(app)
+      .post('/api/messages')
+      .set('Authorization', `Bearer ${modelka}`)
+      .send({ chatId: 'chat-moje', text: 'odpoved modelky', direction: 'OUTBOUND' });
+
+    expect(res.status).not.toBe(403);
+  });
+
+  test('do chatu cizí modelky psát nesmí', async () => {
+    prismaMock.chat.findUnique.mockResolvedValue(chat('chat-cizi', CIZI));
+
+    const res = await request(app)
+      .post('/api/messages')
+      .set('Authorization', `Bearer ${modelka}`)
+      .send({ chatId: 'chat-cizi', text: 'ahoj', direction: 'OUTBOUND' });
+
+    expect(res.status).toBe(403);
+    expect(prismaMock.message.create).not.toHaveBeenCalled();
+  });
+
   test('k chatu cizí modelky ne', async () => {
     prismaMock.chat.findUnique.mockResolvedValue(chat('chat-cizi', CIZI));
     const res = await request(app)
