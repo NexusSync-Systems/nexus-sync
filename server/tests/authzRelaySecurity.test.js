@@ -79,7 +79,11 @@ describe('profile authorization boundaries', () => {
       agencyId: 'agency-1',
       name: 'Diana'
     });
-    prismaMock.user.count.mockResolvedValue(1);
+    // Dotaz na kandidáty vrací jen jednoho z dvou poslaných — ten druhý
+    // je z jiné agentury, takže do `where` s `agencyId` nespadne.
+    prismaMock.user.findMany.mockResolvedValue([
+      { id: 'user-1', role: { name: 'Operator', isManager: false, isAppOwner: false } }
+    ]);
 
     const res = await request(app)
       .patch('/api/profiles/profile-1/assignees')
@@ -89,6 +93,98 @@ describe('profile authorization boundaries', () => {
     expect(res.status).toBe(400);
     expect(res.body).toMatchObject({ message: 'All assignees must belong to the profile agency' });
     expect(prismaMock.profile.update).not.toHaveBeenCalled();
+  });
+
+  // Od #185 mají modelky účty ve stejné agentuře. Do té doby byli „všichni
+  // uživatelé agentury" personál, takže kontrola agentury stačila. Teď už ne:
+  // bez kontroly role by manažerka mohla dát modelce A přístup do chatu
+  // modelky B. UI účty modelek odfiltruje, ale filtr v prohlížeči není
+  // kontrola — tahle rozhoduje na serveru.
+  it('nedovolí přiřadit účet modelky jako operátorku', async () => {
+    prismaMock.profile.findUnique.mockResolvedValue({
+      id: 'profile-1',
+      agencyId: 'agency-1',
+      name: 'Diana'
+    });
+    prismaMock.user.findMany.mockResolvedValue([
+      { id: 'user-1', role: { name: 'Operator', isManager: false, isAppOwner: false } },
+      { id: 'modelka-b', role: { name: 'Model', isManager: false, isAppOwner: false } }
+    ]);
+
+    const res = await request(app)
+      .patch('/api/profiles/profile-1/assignees')
+      .set('Authorization', `Bearer ${makeToken()}`)
+      .send({ userIds: ['user-1', 'modelka-b'] });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ message: 'Model accounts cannot be assigned as operators' });
+    // Podstatnější než status: seznam se nesmí uložit ANI ČÁSTEČNĚ.
+    expect(prismaMock.profile.update).not.toHaveBeenCalled();
+  });
+
+  it('pozná i ručně založenou roli „Modelka" s diakritikou', async () => {
+    prismaMock.profile.findUnique.mockResolvedValue({
+      id: 'profile-1',
+      agencyId: 'agency-1',
+      name: 'Diana'
+    });
+    prismaMock.user.findMany.mockResolvedValue([
+      { id: 'modelka-b', role: { name: 'Modelka', isManager: false, isAppOwner: false } }
+    ]);
+
+    const res = await request(app)
+      .patch('/api/profiles/profile-1/assignees')
+      .set('Authorization', `Bearer ${makeToken()}`)
+      .send({ userIds: ['modelka-b'] });
+
+    expect(res.status).toBe(400);
+    expect(prismaMock.profile.update).not.toHaveBeenCalled();
+  });
+
+  it('operátorku ze stejné agentury přiřadit nechá', async () => {
+    // Opačný směr, jinak by test nad tím prošel i u kódu, který zakazuje
+    // přiřazení komukoli.
+    prismaMock.profile.findUnique.mockResolvedValue({
+      id: 'profile-1',
+      agencyId: 'agency-1',
+      name: 'Diana'
+    });
+    prismaMock.user.findMany.mockResolvedValue([
+      { id: 'op-1', role: { name: 'Operator', isManager: false, isAppOwner: false } },
+      { id: 'op-2', role: { name: 'Senior Operator', isManager: true, isAppOwner: false } }
+    ]);
+    prismaMock.profile.update.mockResolvedValue({ id: 'profile-1', assignees: [] });
+
+    const res = await request(app)
+      .patch('/api/profiles/profile-1/assignees')
+      .set('Authorization', `Bearer ${makeToken()}`)
+      .send({ userIds: ['op-1', 'op-2'] });
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.profile.update).toHaveBeenCalledTimes(1);
+    expect(prismaMock.profile.update.mock.calls[0][0].data).toEqual({
+      assignees: { set: [{ id: 'op-1' }, { id: 'op-2' }] }
+    });
+  });
+
+  it('prázdný seznam projde — je to odebrání všech operátorek', async () => {
+    // `userIds: []` se do kontroly rolí vůbec nedostane a musí dál fungovat
+    // jako „zruš přiřazení", jinak by profil nešel uvolnit.
+    prismaMock.profile.findUnique.mockResolvedValue({
+      id: 'profile-1',
+      agencyId: 'agency-1',
+      name: 'Diana'
+    });
+    prismaMock.profile.update.mockResolvedValue({ id: 'profile-1', assignees: [] });
+
+    const res = await request(app)
+      .patch('/api/profiles/profile-1/assignees')
+      .set('Authorization', `Bearer ${makeToken()}`)
+      .send({ userIds: [] });
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.user.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.profile.update.mock.calls[0][0].data).toEqual({ assignees: { set: [] } });
   });
 });
 

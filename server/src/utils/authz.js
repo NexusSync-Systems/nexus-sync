@@ -12,6 +12,15 @@ const isAppOwnerRole = (role) => {
   return Boolean(role?.isAppOwner) || normalized === 'app_owner' || normalized === 'owner';
 };
 
+// Účet modelky. Rozhoduje se podle NÁZVU role, ne podle příznaku, protože
+// žádný příznak „tohle je modelka" ve schématu není — a stejně jako
+// u `isManagerRole` tím projdou i agentury se staršími daty.
+//
+// Obě podoby názvu: role z `vychoziRole.js` se jmenuje „Model", ale
+// `normalizeRole` zahazuje diakritiku a mezery, takže ručně založená
+// „Modelka" se pozná taky.
+const isModelRole = (role) => ['model', 'modelka'].includes(normalizedRoleName(role));
+
 const isManagerRole = (role) => {
   const normalized = normalizedRoleName(role);
   return Boolean(role?.isManager) ||
@@ -39,6 +48,7 @@ module.exports = {
   normalizedRoleName,
   isAppOwnerRole,
   isManagerRole,
+  isModelRole,
   requireAppOwner,
   requireManager
 };

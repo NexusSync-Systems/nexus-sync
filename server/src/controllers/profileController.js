@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { encrypt, decrypt } = require('../utils/encryption');
 const { getIO } = require('../services/socket');
-const { isAppOwnerRole, isManagerRole } = require('../utils/authz');
+const { isAppOwnerRole, isManagerRole, isModelRole } = require('../utils/authz');
 const { povoleneProfily } = require('../utils/rozsahProfilu');
 const { normalizePhoneNumber } = require('../utils/phoneNumber');
 
@@ -291,14 +291,29 @@ exports.assignUsersToProfile = async (req, res) => {
     if (!existing) return res.status(404).json({ message: 'Profile not found' });
 
     if (userIds.length > 0) {
-      const sameAgencyUsers = await prisma.user.count({
+      // Dřív tu byl `count`, který uměl ověřit jen počet — tedy agenturu.
+      // Roli ověřit neumí, a ta je od #185 potřeba: do té doby modelky
+      // ŽÁDNÉ účty neměly, takže „všichni uživatelé agentury" byl personál.
+      // Teď tam jejich účty jsou, a bez téhle kontroly by manažerka mohla
+      // přes API dát modelce A přístup do chatu modelky B. UI účty modelek
+      // odfiltruje, ale filtr v prohlížeči není kontrola.
+      const kandidati = await prisma.user.findMany({
         where: {
           id: { in: userIds.map(String) },
           agencyId: String(existing.agencyId)
-        }
+        },
+        select: { id: true, role: { select: { name: true, isManager: true, isAppOwner: true } } }
       });
-      if (sameAgencyUsers !== userIds.length) {
+
+      if (kandidati.length !== userIds.length) {
         return res.status(400).json({ message: 'All assignees must belong to the profile agency' });
+      }
+
+      // Obsluhovat profil smí personál. Modelka k profilu přístup má, ale
+      // přes VLASTNICTVÍ (`ownerId`), ne přes přiřazení — tohle je seznam
+      // operátorek, které ho obsluhují.
+      if (kandidati.some((u) => isModelRole(u.role))) {
+        return res.status(400).json({ message: 'Model accounts cannot be assigned as operators' });
       }
     }
 
