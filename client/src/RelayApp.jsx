@@ -148,6 +148,7 @@ const RelayDashboard = () => {
   const [batteryLevel, setBatteryLevel] = useState(100);
   const [isCharging, setIsCharging] = useState(false);
   const [permSms, setPermSms] = useState(false);
+  const [permDefaultSms, setPermDefaultSms] = useState(false);
   const [permDialer, setPermDialer] = useState(false);
   const [isBatOpt, setIsBatOpt] = useState(false);
   const [setupRunning, setSetupRunning] = useState(false);
@@ -179,8 +180,16 @@ const RelayDashboard = () => {
 
     if (relay) {
       const s = await relay.checkStatus?.().catch(() => null);
+      // `smsMonitoring` je nativně jen runtime oprávnění
+      // (`smsState == PermissionState.GRANTED`), ne role výchozí SMS
+      // aplikace. Samo o sobě tedy nestačí: 5. 11. 2026 měl telefon
+      // všechna oprávnění udělená, roli držely Google Zprávy — a obrazovka
+      // přesto hlásila „Oprávnění OK".
+      const def = await relay.isDefaultSmsApp?.().catch(() => null);
+      const jeVychozi = Boolean(def?.isDefault);
+      setPermDefaultSms(jeVychozi);
       if (s) {
-        smsOk = Boolean(s.smsMonitoring);
+        smsOk = Boolean(s.smsMonitoring) && jeVychozi;
         setPermSms(smsOk);
       }
       const bat = await relay.checkBatteryOptimization?.().catch(() => null);
@@ -213,15 +222,17 @@ const RelayDashboard = () => {
       if (!relay) return;
 
       // 1. Standard Permissions (SMS, Location, Phone)
-      let s = await relay.ensureReady?.().catch(() => null);
+      await relay.ensureReady?.().catch(() => null);
       
       // 2. Default SMS App
-      if (s && !s.smsMonitoring) {
-        const defRes = await relay.isDefaultSmsApp?.().catch(() => null);
-        if (defRes && !defRes.isDefault) {
-          await relay.requestDefaultSmsApp?.().catch(() => null);
-          await new Promise(r => setTimeout(r, 1000));
-        }
+      // Podmínka tu dřív zněla `if (s && !s.smsMonitoring)`, tedy o roli
+      // se žádalo JEN když chybělo runtime oprávnění. Jakmile ho uživatel
+      // udělil, přestalo se na roli ptát úplně a telefon zůstal natrvalo
+      // bez ní. Ptáme se vždycky, když ji nemáme.
+      const defRes = await relay.isDefaultSmsApp?.().catch(() => null);
+      if (defRes && !defRes.isDefault) {
+        await relay.requestDefaultSmsApp?.().catch(() => null);
+        await new Promise(r => setTimeout(r, 1000));
       }
 
       // 3. Výchozí vytáčeč — jen když je GSM most zapnutý.
@@ -451,11 +462,24 @@ const RelayDashboard = () => {
           </div>
           <h2 style={{ fontSize: '1.75rem', fontWeight: '800', letterSpacing: '-0.02em', margin: '0 0 0.5rem 0' }}>Nexus Relay</h2>
           <div style={{ fontSize: '0.95rem', color: '#94a3b8', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-            {lang === 'cz' ? 'Profil:' : 'Profile:'}
+            {lang === 'cz' ? 'Přihlášen:' : 'Signed in:'}
             <span style={{ color: '#f8fafc', fontWeight: '600', padding: '0.25rem 0.75rem', background: 'rgba(255,255,255,0.08)', borderRadius: '20px', letterSpacing: '0.02em' }}>
               {operator?.name || operator?.email || 'Modelka'}
             </span>
           </div>
+          {/* Bez prirazeneho profilu relay nestahne frontu odchozich zprav:
+              posle `?profileId=` a server odpovi HTTP 400. Driv to obrazovka
+              nijak nerekla a hlasila „AKTIVNÍ" dal, takze telefon mohl takhle
+              stat tydny. 5. 11. 2026 to stalo cely vecer hledani. */}
+          {!operator?.profileId && (
+            <div style={{ marginTop: '0.75rem', padding: '0.6rem 0.9rem', borderRadius: '12px',
+              background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.35)',
+              color: '#fca5a5', fontSize: '0.8rem', fontWeight: '600', maxWidth: '320px' }}>
+              {lang === 'cz'
+                ? 'Tomuto účtu není přiřazený profil. Odchozí zprávy nebudou chodit.'
+                : 'No profile assigned to this account. Outgoing messages will not arrive.'}
+            </div>
+          )}
         </div>
 
         {/* Main Status Card */}
@@ -516,7 +540,13 @@ const RelayDashboard = () => {
           >
             <ShieldCheck size={26} color={allSetupOk ? '#4ade80' : '#f87171'} strokeWidth={1.5} />
             <span style={{ fontSize: '0.85rem', color: allSetupOk ? '#4ade80' : '#f87171', fontWeight: '600', textAlign: 'center' }}>
-              {allSetupOk ? 'Oprávnění OK' : (setupRunning ? 'Nastavuji...' : 'Chyba v nastavení')}
+              {allSetupOk
+                ? 'Oprávnění OK'
+                : setupRunning
+                  ? 'Nastavuji...'
+                  : !permDefaultSms
+                    ? 'Nejsem výchozí SMS aplikace'
+                    : 'Chyba v nastavení'}
             </span>
           </div>
         </div>
