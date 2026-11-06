@@ -30,6 +30,38 @@ afterEach(() => {
 });
 
 describe('POST /api/auth/login', () => {
+  it('vrátí VLASTNĚNÝ profil, i když uživatel má přiřazené i cizí', async () => {
+    // Přesně ten případ, kde selhávalo řazení: první verze měla
+    // `orderBy: { ownerId: 'desc' }, take: 1`, což řadí podle ŘETĚZCE cizího
+    // id. Tady má cizí profil `ownerId` ("zzz-cizi"), které se v sestupném
+    // pořadí dostane PŘED vlastníkovo "user-1" — takže by se vrátil cizí.
+    prismaMock.user.findUnique.mockResolvedValue(TEST_USER);
+    prismaMock.refreshToken.create.mockResolvedValue({ id: 'rt-1', token: 'refresh-tok' });
+    prismaMock.profile.findMany.mockResolvedValue([
+      { id: 'profil-cizi', ownerId: 'zzz-cizi' },
+      { id: 'profil-muj', ownerId: 'user-1' }
+    ]);
+
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'test@agency.com', password: 'ValidPass1' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.user.profileId).toBe('profil-muj');
+  });
+
+  it('bez vlastněného profilu vrátí přiřazený', async () => {
+    prismaMock.user.findUnique.mockResolvedValue(TEST_USER);
+    prismaMock.refreshToken.create.mockResolvedValue({ id: 'rt-1', token: 'refresh-tok' });
+    prismaMock.profile.findMany.mockResolvedValue([{ id: 'profil-prirazeny', ownerId: null }]);
+
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'test@agency.com', password: 'ValidPass1' });
+
+    expect(res.body.user.profileId).toBe('profil-prirazeny');
+  });
+
   it('returns 200 with tokens on valid credentials', async () => {
     prismaMock.user.findUnique.mockResolvedValue(TEST_USER);
     prismaMock.refreshToken.create.mockResolvedValue({ id: 'rt-1', token: 'refresh-tok' });

@@ -71,12 +71,31 @@ async function withAssignedProfile(user) {
   if (!user?.id) return user;
 
   try {
-    const assignedProfiles = await prisma.profile.findMany({
-      where: { assignees: { some: { id: user.id } } },
-      take: 1,
-      select: { id: true }
+    // Profil, který uživatel VLASTNÍ (modelka), nebo který má přiřazený
+    // (operátorka). Vlastnictví je první v pořadí, protože modelka není
+    // ničí assignee — bez toho by `profileId` vyšlo null a relay telefon
+    // by se nespároval.
+    const kandidati = await prisma.profile.findMany({
+      where: {
+        OR: [
+          { ownerId: user.id },
+          { assignees: { some: { id: user.id } } }
+        ]
+      },
+      select: { id: true, ownerId: true }
     });
-    return { ...user, assignedProfiles: assignedProfiles || [] };
+
+    // Vybírá se VÝSLOVNĚ, ne řazením.
+    //
+    // První verze měla `orderBy: { ownerId: 'desc' }, take: 1` s komentářem
+    // „vlastněný profil první". To ale řadí podle ŘETĚZCE cizího id, ne
+    // podle toho, čí profil to je: operátorka přiřazená k profilu, který
+    // vlastní někdo jiný, má `ownerId` vyplněné cizí hodnotou, takže
+    // `take: 1` mohl vybrat jiný profil, než se zamýšlelo.
+    const vlastni = kandidati.find((pr) => pr.ownerId === user.id);
+    const vybrany = vlastni || kandidati[0] || null;
+
+    return { ...user, assignedProfiles: vybrany ? [{ id: vybrany.id }] : [] };
   } catch (error) {
     console.error('[Auth] Assigned profile lookup failed:', error.message);
     return { ...user, assignedProfiles: [] };
