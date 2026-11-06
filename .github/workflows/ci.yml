@@ -207,7 +207,13 @@ jobs:
     # 172 testy se do 25 minut nevejde. Limit ÚLOHY ji zruší a `continue-on-error`
     # na kroku proti tomu nechrání — výsledkem by byla zabitá úloha, nespuštěný
     # souhrn a ŽÁDNÉ měření, tedy přesný opak záměru.
-    timeout-minutes: ${{ ((github.event_name == 'workflow_dispatch' && inputs.plne_mereni) || github.event_name == 'schedule') && 90 || 25 }}
+    # Měření se 6. 11. 2026 přestěhovalo do vlastní úlohy `mereni-testu`,
+    # takže tahle brána dělá UŽ JEN to, co má: projde / neprojde.
+    # Dřív tu obojí běželo společně a součet (9 min instalace + 6 min testy
+    # + 8 min měření) narazil na limit 25 minut — o čtyři sekundy. GitHub
+    # úlohu zrušil a NASAZENÍ SE PŘESKOČILO, přestože všechny kroky
+    # skončily úspěchem.
+    timeout-minutes: 30
 
     # Backend si zvedáme vlastní, zahazovací.
     #
@@ -215,6 +221,263 @@ jobs:
     # v tests/helpers/api.js) a skutečně tam zapisovaly — každý PR zakládal
     # v ostré databázi testovací vazby zařízení a testovací SMS. Navíc se tím
     # neověřoval kód z PR, ale to, co je zrovna nasazené.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nexus_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+
+    env:
+      # Hodnoty jsou schválně zahazovací a veřejné — databáze i server žijí
+      # jen po dobu běhu úlohy a nejsou odnikud dostupné. Heslo držíme zvlášť
+      # a URL skládáme za běhu, aby connection string nespustil secret scan.
+      PGPASSWORD_CI: postgres
+      NODE_ENV: test
+      JWT_SECRET: ci-e2e-jwt-secret-nejmene-32-znaku-dlouhy
+      DEVICE_SECRET: devicesecret12345
+      NEXUS_DEVICE_SECRET: devicesecret12345
+      # app.js odmítne nastartovat bez těchhle tří (min. 32/16/32 znaků).
+      ENCRYPTION_KEY: ci-e2e-encryption-key-nejmene-32-znaku
+      # Sem míří testy proti živému API místo na produkci.
+      NEXUS_API_URL: http://localhost:3000/api
+      # Zapéká se do buildu klienta, ze kterého `tests/helpers/mocks.js`
+      # servíruje SPA (`client/dist`). Bez ní by `API_BASE` zůstal prázdný,
+      # požadavky by přišly o předponu `/api`, mock by na ně nesedl a SPA
+      # handler by místo JSONu vrátil index.html.
+      #
+      # MUSÍ BÝT https a NESMÍ to být localhost. Stránka se testům servíruje
+      # z `https://…` (viz baseURL v playwright.config.js) a WebKit blokuje
+      # smíšený obsah v rendereru — tedy DŘÍV, než se požadavek dostane
+      # k Playwright mockům. S `http://localhost:3000/api` tu padlo 40 testů
+      # ve webkitu a 0 v ostatních prohlížečích; chromium, firefox i mobile
+      # prošly všechny.
+      #
+      # `.invalid` je podle RFC 2606 vyhrazená a nikdy se nepřeloží, takže
+      # požadavek, který mockům unikne, selže nahlas místo aby šel na cizí
+      # stroj. Veškerý provoz v těchto testech je mockovaný; tahle adresa
+      # se nemá nikdy otevřít.
+      VITE_API_URL: https://nexus-e2e.invalid/api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: client/package-lock.json
+
+      # Klíč se počítá z KOŘENOVÉHO lockfilu, protože `@playwright/test` je
+      # kořenová devDependency. Dřív se hashoval `client/package-lock.json`,
+      # kde Playwright vůbec není — takže každá změna klientské závislosti
+      # zahodila 450 MB prohlížečů, a naopak změna verze Playwrightu cache
+      # nezneplatnila.
+      #
+      # Stálo to nasazení: 5. 11. 2026 zvedl #172 eslint v klientovi, tím se
+      # změnil `client/package-lock.json`, cache minula, stahovaly se všechny
+      # tři prohlížeče od začátku, instalace přešla patnáctiminutový limit,
+      # `e2e-tests` spadly a `deploy-backend` se PŘESKOČIL. Bezpečnostní
+      # oprava z #170 se proto na server nedostala.
+      #
+      # `restore-keys` je tu proto, aby ani miss neznamenal studený start:
+      # vezme se poslední cache se stejným prefixem a doplní se jen rozdíl.
+      - name: Cache Playwright Browsers
+        id: cache-playwright
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Install dependencies
+        run: |
+          npm install --legacy-peer-deps --prefer-offline --no-audit
+          cd client && npm install --legacy-peer-deps --prefer-offline --no-audit
+
+      # Vlastní limit, kratší než limit celé úlohy.
+      #
+      # `--with-deps` stahuje apt balíčky z ubuntu mirroru a ten se občas
+      # zadrhne — 27. 10. 2026 trval tenhle krok přes 20 minut a sebral celý
+      # rozpočet úlohy, takže testy se vůbec nespustily a ve výsledku stálo
+      # jen „timed out". S limitem tady spadne krok, který za to může, a je
+      # z běhu poznat, že šlo o stahování, ne o regresi.
+      #
+      # Instaluje se jen to, co se v tomhle běhu opravdu spustí.
+      #
+      # Komentář tady do 5. 11. 2026 tvrdil, že se instalují všechny
+      # prohlížeče schválně, protože `test:all:e2e` nemá `--project`. To
+      # přestalo platit v #167: dnes je to
+      # `npx playwright test --project=chromium --grep-invert @nahravka`.
+      # V bráně tedy žádný firefox ani webkit nenastartuje —
+      # `test:api` je taky `--project=chromium` a krok měření si bere
+      # `--project=chromium`, dokud není `plne_mereni`. Projekt `mobile` jede
+      # na Pixelu 5, což je pořád chromium.
+      #
+      # Stahovat a apt-instalovat webkit (gstreamer, libwoff, libopus…)
+      # a firefox pro každý PR byla tedy jen práce navíc — a právě ta se
+      # nevešla do limitu.
+      #
+      # Seznam je vypsaný i pro plnou matici: `A && '' || 'chromium'` by
+      # nefungovalo, protože prázdný řetězec je ve výrazech GitHubu nepravda,
+      # takže by plná matice taky dostala jen chromium.
+      # Brána pouští VŽDY jen chromium (`test:all:e2e` i `test:api` mají
+      # `--project=chromium`), takže od oddělení měření nemá důvod sahat
+      # po firefoxu a webkitu ani při plánovaném běhu. Plnou matici
+      # instaluje úloha `mereni-testu`, kde se skutečně pouští.
+      - name: Install Playwright Browsers and system dependencies
+        timeout-minutes: 15
+        run: npx playwright install --with-deps chromium
+
+      # BEZ TOHOHLE KROKU TESTUJE CI NASAZENOU PRODUKCI, NE TENHLE PR.
+      #
+      # tests/helpers/mocks.js servíruje frontend z client/dist. Ten je
+      # v .gitignore, takže v CI po checkoutu neexistuje — mock soubor nenajde,
+      # požadavek propadne dál a skončí na nasazeném webu. Testy pak procházely
+      # bez ohledu na to, co je v PR, a žádnou frontendovou regresi zachytit
+      # nemohly.
+      - name: Build client for e2e
+        run: cd client && npm run build
+
+      # ── Zahazovací backend pro testy proti živému API ──────────────────────
+
+      - name: Build database URL
+        run: echo "DATABASE_URL=postgresql://postgres:${PGPASSWORD_CI}@localhost:5432/nexus_e2e" >> "$GITHUB_ENV"
+
+      - name: Prepare database
+        run: |
+          cd server
+          npm install --prefer-offline --no-audit
+          npx prisma generate
+          npx prisma migrate deploy
+          # Seed zakládá přesně ty účty, které testy používají
+          # (owner@nexus.sync, jan@, alice@ …) — viz tests/helpers/api.js.
+          # Skript se jmenuje prisma:seed; samotné "seed" v package.json je
+          # konfigurace Prismy pro `prisma db seed`, ne npm skript.
+          npm run prisma:seed
+
+      - name: Start backend
+        run: |
+          cd server
+          nohup node src/index.js > "$RUNNER_TEMP/server.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/server.pid"
+
+      # Server startuje déle než nulu sekund a testy, které nemají kam se
+      # připojit, se zaseknou na spojení místo aby řekly proč. Čeká se aktivně
+      # a s limitem, ať je z výpadku hlášená chyba, ne dvacet minut ticha.
+      - name: Wait for backend
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 5 -o /dev/null http://localhost:3000/api/health; then
+              echo "Backend odpovídá po ${i} pokusech."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Zahazovací backend nenastartoval do 60 s."
+          cat "$RUNNER_TEMP/server.log" || true
+          exit 1
+
+      # Úmyslně to shodí celý běh: RBAC a relay jsou bezpečnostní testy
+      # a neproběhlá kontrola není totéž co kontrola v pořádku.
+      #
+      # PŘEKRYV S HLAVNÍM BĚHEM JE VĚDOMÝ. Od chvíle, kdy hlavní běh pouští
+      # všechny specifikace, je těchhle 47 testů v obou krocích — změřeno,
+      # ne odhadnuto. Zůstává to tak schválně: tenhle krok běží DŘÍV a shodí
+      # běh hned, místo aby se bezpečnostní regrese ukázala až po deseti
+      # minutách mezi ostatními.
+      #
+      # Cena je asi 2–3 minuty navíc. Alternativa by byla vyloučit je
+      # z hlavního běhu — tedy zavést druhý ruční seznam, přesně to, co
+      # tahle změna ruší.
+      - name: Run API relay/security tests
+        run: npm run test:api
+
+      # Log serveru je jediné, z čeho jde poznat, proč test proti živému API
+      # spadl — bez něj zbývá jen stavový kód odpovědi.
+      - name: Backend log
+        if: failure()
+        run: tail -n 200 "$RUNNER_TEMP/server.log" || true
+
+      - name: Run Playwright tests
+        run: npm run test:all:e2e
+        env:
+          FRONTEND_URL: ${{ secrets.FRONTEND_URL || 'https://nexus-sync-8d50b.web.app' }}
+
+      # Bez tohohle bylo u zčervenalé úlohy vidět jen její jméno a co přesně
+      # padlo se zjišťovalo projetím logu. Viz docs/audit-testu-a-ci.md, nález 4.
+      # `continue-on-error`: krok, který jen vypisuje, nemá nikdy shodit běh,
+      # kterému testy prošly.
+      - name: Souhrn E2E do shrnutí úlohy
+        if: always()
+        continue-on-error: true
+        run: |
+          node scripts/shrnuti-testu.js \
+            test-results/playwright-results.json \
+            "E2E testy, které CI spouští" >> "$GITHUB_STEP_SUMMARY"
+
+      # ── Měření, ne brána ────────────────────────────────────────────────
+      #
+      # `test:all:e2e` je ruční výčet 13 souborů, ale v `tests/` jich je 38:
+      # 118 ze 164 testů se tedy nikdy nespustí (docs/audit-testu-a-ci.md,
+      # nález 1). Nejsou vyřazené schválně — jen se do výčtu nikdy nedopsaly.
+      #
+      # Než je půjde zapojit, musí se vědět, kolik z nich vůbec prochází.
+      # Zapnout je naslepo by znamenalo trvale červené CI, a na červenou se
+      # přestane koukat — to je horší než dnešek.
+      #
+      # Proto `continue-on-error`: tenhle krok NIC neblokuje, jen měří.
+      # Jen na masteru a jen chromium, aby to nezdržovalo každý PR.
+      #
+      # Bez výčtu souborů schválně: testDir je `./tests` a android si projekty
+      # pro prohlížeče ignorují samy, takže `playwright test` vezme všechno.
+      # Čtvrtý ruční seznam téhož by byl přesně ta vada, kterou audit vytýká.
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # ── Kontrola oprávnění v manifestech ────────────────────────────────────────
+  #
+  # Plná aplikace míří do Google Play. SMS a seznam hovorů tam Google schválí
+  # jen aplikaci, jejíž hlavní funkce je vyžaduje — to je relay, ne aplikace
+  # pro operátorky. Dokud byla oprávnění ve sdíleném manifestu, dědily je obě.
+  #
+  # Tohle není jen ověření změny, ale POJISTKA DO BUDOUCNA: kdo přidá SMS
+  # oprávnění do src/main, dozví se to tady, ne až při zamítnutí v Obchodu.
+  #
+  # Běží i na PR (na rozdíl od stavby APK) a trvá vteřiny — slučuje jen
+  # manifesty, nestaví aplikaci.
+  # ── Měření testů, které brána nepouští ────────────────────────────────
+  #
+  # Vlastní úloha schválně: do brány nepatří. Brána má odpovědět
+  # „projde / neprojde" co nejdřív, protože na ní visí `deploy-backend`.
+  # Měření je údaj pro člověka, ne podmínka nasazení — a osm minut navíc
+  # u každého pushe do masteru zdržovalo každé nasazení.
+  #
+  # NA NIC NEČEKÁ a nic nečeká na ni (`needs` nemá), takže běží souběžně
+  # s nasazením. Když měření spadne, nasazení to neohrozí.
+  #
+  # Příprava prostředí je kopie z `e2e-tests` — Actions nemají jak kroky
+  # sdílet bez composite action. Když se bude měnit tam, musí se i tady.
+  mereni-testu:
+    name: Měření testů mimo bránu
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.plne_mereni)
+    timeout-minutes: 90
+
     services:
       postgres:
         image: postgres:16-alpine
@@ -386,48 +649,6 @@ jobs:
       # Cena je asi 2–3 minuty navíc. Alternativa by byla vyloučit je
       # z hlavního běhu — tedy zavést druhý ruční seznam, přesně to, co
       # tahle změna ruší.
-      - name: Run API relay/security tests
-        run: npm run test:api
-
-      # Log serveru je jediné, z čeho jde poznat, proč test proti živému API
-      # spadl — bez něj zbývá jen stavový kód odpovědi.
-      - name: Backend log
-        if: failure()
-        run: tail -n 200 "$RUNNER_TEMP/server.log" || true
-
-      - name: Run Playwright tests
-        run: npm run test:all:e2e
-        env:
-          FRONTEND_URL: ${{ secrets.FRONTEND_URL || 'https://nexus-sync-8d50b.web.app' }}
-
-      # Bez tohohle bylo u zčervenalé úlohy vidět jen její jméno a co přesně
-      # padlo se zjišťovalo projetím logu. Viz docs/audit-testu-a-ci.md, nález 4.
-      # `continue-on-error`: krok, který jen vypisuje, nemá nikdy shodit běh,
-      # kterému testy prošly.
-      - name: Souhrn E2E do shrnutí úlohy
-        if: always()
-        continue-on-error: true
-        run: |
-          node scripts/shrnuti-testu.js \
-            test-results/playwright-results.json \
-            "E2E testy, které CI spouští" >> "$GITHUB_STEP_SUMMARY"
-
-      # ── Měření, ne brána ────────────────────────────────────────────────
-      #
-      # `test:all:e2e` je ruční výčet 13 souborů, ale v `tests/` jich je 38:
-      # 118 ze 164 testů se tedy nikdy nespustí (docs/audit-testu-a-ci.md,
-      # nález 1). Nejsou vyřazené schválně — jen se do výčtu nikdy nedopsaly.
-      #
-      # Než je půjde zapojit, musí se vědět, kolik z nich vůbec prochází.
-      # Zapnout je naslepo by znamenalo trvale červené CI, a na červenou se
-      # přestane koukat — to je horší než dnešek.
-      #
-      # Proto `continue-on-error`: tenhle krok NIC neblokuje, jen měří.
-      # Jen na masteru a jen chromium, aby to nezdržovalo každý PR.
-      #
-      # Bez výčtu souborů schválně: testDir je `./tests` a android si projekty
-      # pro prohlížeče ignorují samy, takže `playwright test` vezme všechno.
-      # Čtvrtý ruční seznam téhož by byl přesně ta vada, kterou audit vytýká.
       - name: Změřit i testy, které v CI neběží
         if: always() && (github.ref == 'refs/heads/master' || inputs.plne_mereni || github.event_name == 'schedule')
         continue-on-error: true
@@ -503,28 +724,6 @@ jobs:
       # Jediná věc, kterou měl zrušený workflow „QA: E2E Testing Suite" a tenhle
       # job ne. Bez reportu zbývá po spadlém testu jen řádek v logu — žádná
       # trasa, žádný snímek, žádné video, přesně ve chvíli, kdy jsou potřeba.
-      - name: Upload Playwright report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: playwright-report
-          path: |
-            playwright-report/
-            test-results/
-          retention-days: 30
-          if-no-files-found: ignore
-
-  # ── Kontrola oprávnění v manifestech ────────────────────────────────────────
-  #
-  # Plná aplikace míří do Google Play. SMS a seznam hovorů tam Google schválí
-  # jen aplikaci, jejíž hlavní funkce je vyžaduje — to je relay, ne aplikace
-  # pro operátorky. Dokud byla oprávnění ve sdíleném manifestu, dědily je obě.
-  #
-  # Tohle není jen ověření změny, ale POJISTKA DO BUDOUCNA: kdo přidá SMS
-  # oprávnění do src/main, dozví se to tady, ne až při zamítnutí v Obchodu.
-  #
-  # Běží i na PR (na rozdíl od stavby APK) a trvá vteřiny — slučuje jen
-  # manifesty, nestaví aplikaci.
   android-manifest-check:
     name: Android Manifest Permissions
     runs-on: ubuntu-latest
