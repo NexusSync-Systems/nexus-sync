@@ -71,8 +71,18 @@ async function withAssignedProfile(user) {
   if (!user?.id) return user;
 
   try {
+    // Profil, který uživatel VLASTNÍ (modelka), nebo který má přiřazený
+    // (operátorka). Vlastnictví je první v pořadí, protože modelka není
+    // ničí assignee — bez toho by `profileId` vyšlo null a relay telefon
+    // by se nespároval.
     const assignedProfiles = await prisma.profile.findMany({
-      where: { assignees: { some: { id: user.id } } },
+      where: {
+        OR: [
+          { ownerId: user.id },
+          { assignees: { some: { id: user.id } } }
+        ]
+      },
+      orderBy: { ownerId: 'desc' },   // vlastněný profil první
       take: 1,
       select: { id: true }
     });

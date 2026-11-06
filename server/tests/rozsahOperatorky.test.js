@@ -68,11 +68,13 @@ beforeEach(() => {
       })
     )
   };
+  // Dotaz se od 6. 11. 2026 ptá přes `OR`: vlastnictví NEBO přiřazení.
+  // Modelka není ničí assignee, proto ta první větev.
   prismaMock.profile.findMany = jest.fn().mockImplementation(({ where }) => {
-    const chceAssignees = where?.assignees?.some?.id;
-    if (chceAssignees === 'op-1') return Promise.resolve([{ id: MOJE }]);
-    if (chceAssignees) return Promise.resolve([]);
-    return Promise.resolve([{ id: MOJE }, { id: CIZI }]);
+    const vetve = where?.OR;
+    if (!Array.isArray(vetve)) return Promise.resolve([{ id: MOJE }, { id: CIZI }]);
+    const kdo = vetve.map((v) => v.ownerId ?? v.assignees?.some?.id).find(Boolean);
+    return Promise.resolve(kdo === 'op-1' ? [{ id: MOJE }] : []);
   });
   prismaMock.chat.findMany = jest.fn().mockResolvedValue([]);
   prismaMock.message.findMany = jest.fn().mockResolvedValue([]);
@@ -113,6 +115,41 @@ describe('psaní do cizí modelky', () => {
       .send({ chatId: 'chat-cizi', text: 'ahoj', direction: 'OUTBOUND' });
     expect(res.status).toBe(403);
     expect(prismaMock.message.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('modelka vidí svůj vlastní profil', () => {
+  // Modelka se hlásí SVÝM účtem (role Model) a profil nemá přiřazený —
+  // vlastní ho. Bez větve přes `ownerId` by po zúžení rozsahu neviděla
+  // ani své vlastní zprávy, a relay telefon by se nespároval vůbec.
+  const modelka = token({ userId: 'model-1', roleName: 'Model' });
+
+  beforeEach(() => {
+    prismaMock.user.findUnique = jest.fn().mockResolvedValue({
+      tokenVersion: 0, role: { name: 'Model', isManager: false, isAppOwner: false }
+    });
+    prismaMock.profile.findMany = jest.fn().mockImplementation(({ where }) => {
+      const vetve = where?.OR;
+      if (!Array.isArray(vetve)) return Promise.resolve([{ id: MOJE }, { id: CIZI }]);
+      const vlastni = vetve.map((v) => v.ownerId).find(Boolean);
+      return Promise.resolve(vlastni === 'model-1' ? [{ id: MOJE }] : []);
+    });
+  });
+
+  test('ke svému chatu se dostane', async () => {
+    prismaMock.chat.findUnique.mockResolvedValue(chat('chat-moje', MOJE));
+    const res = await request(app)
+      .get('/api/messages/chat-moje')
+      .set('Authorization', `Bearer ${modelka}`);
+    expect(res.status).toBe(200);
+  });
+
+  test('k chatu cizí modelky ne', async () => {
+    prismaMock.chat.findUnique.mockResolvedValue(chat('chat-cizi', CIZI));
+    const res = await request(app)
+      .get('/api/messages/chat-cizi')
+      .set('Authorization', `Bearer ${modelka}`);
+    expect(res.status).toBe(403);
   });
 });
 

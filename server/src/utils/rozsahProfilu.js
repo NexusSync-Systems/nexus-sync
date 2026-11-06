@@ -21,10 +21,19 @@ const { isManagerRole } = require('./authz');
 /** `null` = bez omezení (manažerka a výš), jinak seznam povolených profileId. */
 const povoleneProfily = async (user) => {
   if (isManagerRole(user?.role)) return null;
+  // Dvě cesty k profilu, obě legitimní:
+  //   - VLASTNICTVÍ  — modelka ke svému vlastnímu profilu
+  //   - PŘIŘAZENÍ    — operátorka k profilu, který obsluhuje
+  //
+  // Modelka není ničí assignee, takže bez té první větve by po zúžení
+  // rozsahu neviděla ani své vlastní zprávy.
   const profily = await prisma.profile.findMany({
     where: {
       agencyId: String(user?.agencyId),
-      assignees: { some: { id: String(user?.userId) } }
+      OR: [
+        { ownerId: String(user?.userId) },
+        { assignees: { some: { id: String(user?.userId) } } }
+      ]
     },
     select: { id: true }
   });

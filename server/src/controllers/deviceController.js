@@ -149,6 +149,22 @@ exports.verifyDeviceBinding = async (req, res) => {
       resolvedProfileId = profile.id;
     }
 
+    // Vlastnictví má přednost před přiřazením.
+    //
+    // Relay telefon patří MODELCE a ta se na něj hlásí svým účtem. Profil
+    // se proto hledá nejdřív podle vlastnictví (`ownerId`) a teprve pak
+    // podle `assignees`, tedy operátorek, které ho obsluhují.
+    //
+    // Bez tohohle pořadí by se modelka s vlastním účtem nespárovala vůbec
+    // (není ničí assignee) a telefon by se dál musel hlásit účtem
+    // operátorky — tedy podepisovat její jménem i to, co udělala modelka.
+    if (!resolvedProfileId) {
+      const vlastni = await prisma.profile.findFirst({
+        where: { agencyId: String(agencyId), ownerId: String(userId) }
+      });
+      if (vlastni) resolvedProfileId = vlastni.id;
+    }
+
     if (!resolvedProfileId) {
       const assignedProfile = await prisma.profile.findFirst({ where: { agencyId: String(agencyId), assignees: { some: { id: String(userId) } } } });
       if (assignedProfile) resolvedProfileId = assignedProfile.id;

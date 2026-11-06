@@ -110,6 +110,8 @@ model User {
   pushDevices      PushDevice[]
   deviceBindings   DeviceBinding[]
   assignedProfiles Profile[]       @relation("ProfileAssignees")
+  // Profil, který tenhle účet vlastní — má ho jen modelka, ne operátorka.
+  ownedProfile     Profile?        @relation("ProfileOwner")
   auditLogs        AuditLog[]
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
@@ -238,6 +240,19 @@ model Profile {
   deviceBindings DeviceBinding[]
   sipDids        SipDid[]
   assignees      User[]          @relation("ProfileAssignees")
+
+  // Účet modelky, které tenhle profil patří.
+  //
+  // `assignees` jsou OPERÁTORKY, které profil obsluhují. Vlastnictví je něco
+  // jiného: je to identita člověka, jehož telefon a číslo to jsou. Do 6. 11.
+  // 2026 vazba chyběla, takže se relay telefon modelky hlásil účtem
+  // operátorky — a vazba zařízení, audit i „kdo co udělal" pak ukazovaly na
+  // operátorku i u toho, co udělala modelka.
+  //
+  // `@unique`: jeden účet vlastní nejvýš jeden profil. Jedna modelka =
+  // jeden účet = jeden telefon.
+  ownerId        String?         @unique
+  owner          User?           @relation("ProfileOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   clientNotes    ClientNote[]
   credentials    String? // Encrypted JSON containing platform logins, cookies, and proxy settings
   commission     Float           @default(50) // Percentage (0-100)
