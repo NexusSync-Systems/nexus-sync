@@ -1,4 +1,5 @@
 const prisma = require('../services/db');
+const { smiNaProfil } = require('../utils/rozsahProfilu');
 const { getIO } = require('../services/socket');
 const { sendChatPush, sendRelaySmsPush } = require('../services/pushService');
 const { getPhoneLookupValues, normalizePhoneNumber } = require('../utils/phoneNumber');
@@ -13,6 +14,11 @@ exports.getMessages = async (req, res) => {
     });
     if (!chat) return res.status(404).json({ message: 'Chat not found' });
     if (chat.agencyId !== agencyId) return res.status(403).json({ message: 'Access denied' });
+    // Agentura nestačí: operátorka smí jen na modelky, které má
+    // přiřazené. Manažerce `smiNaProfil` vrátí true vždy.
+    if (!(await smiNaProfil(req.user, chat.profileId))) {
+      return res.status(403).json({ message: 'Access denied: profile not assigned to you' });
+    }
 
     const phoneVariants = getPhoneLookupValues(chat.externalId, { referenceNumber: chat.profile?.phoneNumber });
     let chatIds = [chat.id];
@@ -54,6 +60,11 @@ exports.createMessage = async (req, res) => {
     const chat = await prisma.chat.findUnique({ where: { id: chatId } });
     if (!chat) return res.status(404).json({ message: 'Chat not found' });
     if (chat.agencyId !== agencyId) return res.status(403).json({ message: 'Access denied' });
+    // Agentura nestačí: operátorka smí jen na modelky, které má
+    // přiřazené. Manažerce `smiNaProfil` vrátí true vždy.
+    if (!(await smiNaProfil(req.user, chat.profileId))) {
+      return res.status(403).json({ message: 'Access denied: profile not assigned to you' });
+    }
     
         // 1. Save message to DB first with 'pending_relay' status (User Request: DB first)
     const message = await prisma.message.create({
@@ -143,6 +154,9 @@ exports.simulateInbound = async (req, res) => {
     const profile = await prisma.profile.findUnique({ where: { id: profileId } });
     if (!profile) return res.status(404).json({ message: 'Profile not found' });
     if (profile.agencyId !== agencyId) return res.status(403).json({ message: 'Access denied' });
+    if (!(await smiNaProfil(req.user, profileId))) {
+      return res.status(403).json({ message: 'Access denied: profile not assigned to you' });
+    }
     const normalizedExternalId = normalizePhoneNumber(externalId, { referenceNumber: profile.phoneNumber });
     const phoneVariants = getPhoneLookupValues(externalId, { referenceNumber: profile.phoneNumber });
     let chat = await prisma.chat.findFirst({
@@ -229,6 +243,11 @@ exports.markAsRead = async (req, res) => {
     const message = await prisma.message.findUnique({ where: { id: messageId }, include: { chat: true } });
     if (!message) return res.status(404).json({ message: 'Message not found' });
     if (message.chat.agencyId !== agencyId) return res.status(403).json({ message: 'Access denied' });
+    // Agentura nestačí: operátorka smí jen na modelky, které má
+    // přiřazené. Manažerce `smiNaProfil` vrátí true vždy.
+    if (!(await smiNaProfil(req.user, message.chat.profileId))) {
+      return res.status(403).json({ message: 'Access denied: profile not assigned to you' });
+    }
 
     const updated = await prisma.message.update({
       where: { id: messageId },
@@ -314,6 +333,11 @@ exports.updateMessageStatus = async (req, res) => {
     });
     if (!prevMessage) return res.status(404).json({ message: 'Message not found' });
     if (prevMessage.chat.agencyId !== agencyId) return res.status(403).json({ message: 'Access denied' });
+    // Agentura nestačí: uživatel smí jen na modelky, které má přiřazené.
+    // Na zařízení se to nevztahuje — to omezuje vazba hned pod tím.
+    if (!req.relayBinding && !(await smiNaProfil(req.user, prevMessage.chat.profileId))) {
+      return res.status(403).json({ message: 'Access denied: profile not assigned to you' });
+    }
     // Zařízení hlásí stav jen u zpráv svého profilu — stejné omezení jako
     // u výdeje fronty, jinak by šlo přepsat stav cizí zprávy.
     if (req.relayBinding && String(req.relayBinding.profileId) !== String(prevMessage.chat.profileId)) {

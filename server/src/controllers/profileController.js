@@ -4,6 +4,7 @@ const path = require('path');
 const { encrypt, decrypt } = require('../utils/encryption');
 const { getIO } = require('../services/socket');
 const { isAppOwnerRole, isManagerRole } = require('../utils/authz');
+const { povoleneProfily } = require('../utils/rozsahProfilu');
 const { normalizePhoneNumber } = require('../utils/phoneNumber');
 
 function parseData(raw) {
@@ -97,7 +98,15 @@ exports.getProfiles = async (req, res) => {
       return res.json([]);
     }
 
-    const where = isAppOwner ? {} : { agencyId: String(agencyId) };
+    // `isAgencyLevel` se tu dřív spočítal a zahodil, takže řadová
+    // operátorka viděla všechny modelky agentury. Teď se seznam zúží
+    // na přiřazené; manažerce a výš se nezužuje.
+    const povoleneIds = isAgencyLevel ? null : await povoleneProfily(req.user);
+    const where = isAppOwner
+      ? {}
+      : povoleneIds === null
+        ? { agencyId: String(agencyId) }
+        : { agencyId: String(agencyId), id: { in: povoleneIds } };
     const profiles = await prisma.profile.findMany({
       where,
       include: { 
