@@ -461,7 +461,18 @@ export function useNexusData({
       const skip = (value) => Promise.resolve({ data: value });
 
       // PHASE 2: HEAVY DATA (Background hydration)
-      const [chatRes, bindingRes, trackerRes, statsRes, agencyRes, analyticsRes, bookingRes, featuresRes, globalSettingsRes, subCurrentRes, subHistoryRes, featureLocksRes] = await Promise.all([
+      // `Promise.all` padne CELÝ, jakmile odmítne jediná větev — a tři z nich
+      // (`/chats`, `/device/bindings`, `/agency/stats`) `.catch()` neměly.
+      // `/agency/stats` přitom vrací operátorce 403, protože statistiky
+      // agentury jí nepatří. Výsledek: operátorka neuviděla NIC — ani chaty,
+      // ani zařízení, ani modelky, přestože `/profiles` jí tři vracel.
+      // Změřeno 5. 11. 2026 jejím vlastním tokenem.
+      //
+      // `allSettled` místo doplnění tří `.catch()` záměrně: jinak stejná past
+      // sklapne s dalším endpointem, který někdo přidá bez `.catch()`.
+      // Všichni odběratelé níž už `null` snesou — každý sedí v `if (xRes?.data)`.
+      const __jmenaVolani = ["chatRes", "bindingRes", "trackerRes", "statsRes", "agencyRes", "analyticsRes", "bookingRes", "featuresRes", "globalSettingsRes", "subCurrentRes", "subHistoryRes", "featureLocksRes"];
+      const __vysledky = await Promise.allSettled([
         axiosWithTiming(`${API_BASE}/chats`, { headers: { Authorization: `Bearer ${token}` } }),
         axiosWithTiming(`${API_BASE}/device/bindings`, { headers: { Authorization: `Bearer ${token}` } }),
         axiosWithTiming(`${API_BASE}/trackers`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: { trackers: [] } })),
@@ -475,6 +486,16 @@ export function useNexusData({
         axiosWithTiming(`${API_BASE}/subscriptions/history`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null),
         axiosWithTiming(`${API_BASE}/admin/feature-locks`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: { locks: {} } }))
       ]);
+
+      const __nepovedlo = __vysledky
+        .map((v, idx) => (v.status === 'rejected' ? __jmenaVolani[idx] : null))
+        .filter(Boolean);
+      if (__nepovedlo.length) {
+        // Hlásit nahlas: tiše spolknutá chyba je důvod, proč tahle vada přežila.
+        console.warn('[Nexus] Cast dat se nenacetla:', __nepovedlo.join(', '));
+      }
+      const [chatRes, bindingRes, trackerRes, statsRes, agencyRes, analyticsRes, bookingRes, featuresRes, globalSettingsRes, subCurrentRes, subHistoryRes, featureLocksRes] =
+        __vysledky.map((v) => (v.status === 'fulfilled' ? v.value : null));
 
       // Zámky funkcí: nasypeme do module-store (gating) i lokálního stavu (admin UI).
       if (featureLocksRes?.data?.locks && typeof featureLocksRes.data.locks === 'object') {
