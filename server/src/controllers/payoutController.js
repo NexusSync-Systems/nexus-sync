@@ -1,10 +1,11 @@
+const { isManagerRole } = require('../utils/authz');
 const prisma = require('../services/db');
 
 // GET /api/payouts/summary?startDate=xxx&endDate=xxx
 exports.getPayoutSummary = async (req, res) => {
   try {
     const { agencyId, role } = req.user;
-    if (!role?.isManager && !role?.isAppOwner) {
+    if (!isManagerRole(role)) {
       return res.status(403).json({ message: 'Access denied' });
     }
 
@@ -59,7 +60,7 @@ exports.getPayoutSummary = async (req, res) => {
 exports.exportPayouts = async (req, res) => {
   try {
     const { agencyId, role } = req.user;
-    if (!role?.isManager && !role?.isAppOwner) {
+    if (!isManagerRole(role)) {
       return res.status(403).json({ message: 'Access denied' });
     }
 

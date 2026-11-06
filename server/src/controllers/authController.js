@@ -1,3 +1,4 @@
+const { VYCHOZI_ROLE, dataRole } = require('../config/vychoziRole');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
@@ -331,14 +332,15 @@ exports.registerAgency = async (req, res) => {
         audit_logs: true, qa_hub: true, settings: true, inventory: false
       });
 
-      const role = await tx.role.create({
-        data: {
-          name: 'Agency Admin',
-          description: 'Full access to agency resources',
-          permissions: globalTemplate ? globalTemplate.permissions : defaultPerms,
-          isAppOwner: false,
-          agencyId: agency.id
-        }
+      // Zakládají se VŠECHNY tři role, ne jen admin. Dřív vznikla jen
+      // „Agency Admin" a ostatní se dotvářely až při pozvánce — agentura
+      // tedy neměla vedoucí operátorku, dokud si o ni někdo nepřišel.
+      await tx.role.createMany({
+        data: VYCHOZI_ROLE.map((r) =>
+          dataRole(r.name, agency.id, r.name === 'Agency Admin' ? globalTemplate : null))
+      });
+      const role = await tx.role.findFirst({
+        where: { agencyId: agency.id, name: 'Agency Admin' }
       });
 
       const user = await tx.user.create({
@@ -414,12 +416,10 @@ exports.registerUser = async (req, res) => {
         where: { name: requestedRole, agencyId: null }
       });
 
+      // `isManager` se dřív nenastavoval vůbec → schéma dosadilo `false`,
+      // takže „Senior Operator" vznikla jako řadová operátorka.
       role = await prisma.role.create({
-        data: {
-          name: requestedRole,
-          permissions: globalTemplate ? globalTemplate.permissions : rolePermissions,
-          agencyId: agency.id
-        }
+        data: dataRole(requestedRole, agency.id, globalTemplate)
       });
     }
 

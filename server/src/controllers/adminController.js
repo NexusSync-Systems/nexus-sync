@@ -1,3 +1,4 @@
+const { isManagerRole } = require('../utils/authz');
 const prisma = require('../services/db');
 const logger = require('../services/logger');
 const monitoringService = require('../services/monitoringService');
@@ -19,7 +20,7 @@ exports.getGlobalFeatures = async (req, res) => {
   try {
     const userRole = req.user?.role;
     // Povolíme přístup App Ownerovi a Managerům
-    if (!userRole || (!userRole.isAppOwner && !userRole.isManager)) {
+    if (!userRole || !isManagerRole(userRole)) {
       return res.status(403).json({ error: 'Access denied: Requires App Owner or Manager role.' });
     }
 

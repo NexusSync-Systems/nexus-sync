@@ -1,3 +1,4 @@
+const { isManagerRole } = require('../utils/authz');
 const prisma = require('../services/db');
 const logger = require('../services/logger');
 // logAction se requiruje lazy uvnitř handlerů — auditController ↔ roleController
@@ -40,7 +41,7 @@ exports.getRoles = async (req, res) => {
         const { agencyId } = req.query;
         const { role: userRole, agencyId: userAgencyId } = req.user;
 
-        if (!userRole?.isAppOwner && !userRole?.isManager) {
+        if (!isManagerRole(userRole)) {
             return res.status(403).json({ message: 'Access denied' });
         }
 
@@ -96,7 +97,7 @@ exports.updateRolePermissions = async (req, res) => {
         const { permissions } = req.body;
         const { role: userRole } = req.user;
 
-        if (!userRole?.isAppOwner && !userRole?.isManager) {
+        if (!isManagerRole(userRole)) {
             return res.status(403).json({ message: 'Not authorized to modify roles' });
         }
 
