@@ -649,6 +649,13 @@ jobs:
       # Cena je asi 2–3 minuty navíc. Alternativa by byla vyloučit je
       # z hlavního běhu — tedy zavést druhý ruční seznam, přesně to, co
       # tahle změna ruší.
+      # Adresář musí existovat PŘEDTÍM, než do něj měření přesměruje výstup.
+      # V bráně ho zakládal krok „Run Playwright tests", který tahle úloha
+      # nemá — bez tohohle by `> test-results/mereni-vse.json` selhalo,
+      # `|| true` by to spolklo a souhrn by tiše hlásil „neproběhlo".
+      - name: Založit adresář pro výsledky
+        run: mkdir -p test-results
+
       - name: Změřit i testy, které v CI neběží
         if: always() && (github.ref == 'refs/heads/master' || inputs.plne_mereni || github.event_name == 'schedule')
         continue-on-error: true
@@ -724,6 +731,17 @@ jobs:
       # Jediná věc, kterou měl zrušený workflow „QA: E2E Testing Suite" a tenhle
       # job ne. Bez reportu zbývá po spadlém testu jen řádek v logu — žádná
       # trasa, žádný snímek, žádné video, přesně ve chvíli, kdy jsou potřeba.
+
+      # Souhrn jde do shrnutí úlohy, ale JSON se nahrává jako artefakt —
+      # jinak se výsledek měření nedá přečíst odjinud než z prohlížeče (#164).
+      - name: Nahrát výsledky měření
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mereni-testu
+          path: test-results/
+          retention-days: 30
+          if-no-files-found: ignore
   android-manifest-check:
     name: Android Manifest Permissions
     runs-on: ubuntu-latest
@@ -1884,5 +1902,3 @@ jobs:
             echo "- Chybí secrety:$CHYBI" >> "$GITHUB_STEP_SUMMARY"
             echo "::warning::Relay field testu chybí secrety:$CHYBI — i po zapnutí by spadl na preflightu."
           fi
-
-
