@@ -13,7 +13,12 @@
  *   node scripts/preklop-role-agentur.js          # ukáže, co by udělal
  *   node scripts/preklop-role-agentur.js --ano    # provede to
  */
-require('dotenv').config();
+const path = require('path');
+// Cesta k `.env` se odvozuje od UMÍSTĚNÍ SKRIPTU, ne od pracovního adresáře.
+// Na serveru je kořen serverové části `/root/nexus-backend`, takže
+// `__dirname/..` je přesně ono. Bez toho by `DATABASE_URL` chybělo pokaždé,
+// když se skript nespustí z toho adresáře — a Prisma by neřekla proč.
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const { PrismaClient } = require('@prisma/client');
 const { ZNAME_ROLE, dataRole } = require('../src/config/vychoziRole');
 
