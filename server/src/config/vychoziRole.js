@@ -28,9 +28,14 @@
 // ZNÁMÉ role = všechny, pro které známe správné příznaky a oprávnění.
 // VÝCHOZÍ role = podmnožina, která se zakládá hned při vzniku agentury.
 //
-// „Model" sem patří, ale při zakládání agentury nevzniká: modelka je
-// v tomhle systému `Profile`, ne účet, a role se použije jen tehdy, když
-// se někdo přihlásí pozvánkou jako Model.
+// „Model" sem patří, ale při zakládání agentury nevzniká — až když je komu
+// ji dát.
+//
+// Pozor, tady dřív stálo, že „modelka je `Profile`, ne účet". To od #184
+// (6. 11. 2026) NEPLATÍ: profil má `ownerId` a modelka svůj účet má, aby se
+// na relay telefon hlásila sama za sebe a audit ukazoval na ni, ne na
+// operátorku. Tu roli zakládá `scripts/zaloz-ucty-modelek.js`, protože
+// u agentur, které vznikly dřív, chybí.
 const ZNAME_ROLE = [
   {
     name: 'Agency Admin',
