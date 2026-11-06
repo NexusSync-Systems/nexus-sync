@@ -1,3 +1,4 @@
+const { isManagerRole } = require('../utils/authz');
 const prisma = require('../services/db');
 const { getIO } = require('../services/socket');
 const { sendChatPush } = require('../services/pushService');
@@ -364,7 +365,7 @@ async function findOrCreateChat(externalId, clientName, transport, routing = {})
 exports.getMyWebhookConfig = async (req, res) => {
   try {
     const role = req.user?.role;
-    if (!role?.isAppOwner && !role?.isManager) {
+    if (!isManagerRole(role)) {
       return res.status(403).json({ message: 'Manager role required' });
     }
     const agencyId = req.user?.agencyId;

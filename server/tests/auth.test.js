@@ -261,7 +261,11 @@ describe('POST /api/auth/register-agency', () => {
 
     prismaMock.$transaction.mockImplementation(async (fn) => {
       prismaMock.agency.create.mockResolvedValue(mockAgency);
-      prismaMock.role.findFirst.mockResolvedValue(null);
+      // Dvě různá hledání: nejdřív globální šablona (`agencyId: null`),
+      // která v produkci neexistuje, pak role právě založená pro agenturu.
+      prismaMock.role.findFirst.mockImplementation(({ where }) =>
+        Promise.resolve(where?.agencyId == null ? null : mockRole));
+      prismaMock.role.createMany.mockResolvedValue({ count: 3 });
       prismaMock.role.create.mockResolvedValue(mockRole);
       prismaMock.user.create.mockResolvedValue(mockUser);
       return fn(prismaMock);
