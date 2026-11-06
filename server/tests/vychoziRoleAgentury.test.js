@@ -18,7 +18,7 @@
  * Stejná past čekala na vedoucí operátorku: „Senior Operator" by vznikla
  * bez příznaku, tedy jako řadová operátorka.
  */
-const { VYCHOZI_ROLE, vychoziRole, dataRole } = require('../src/config/vychoziRole');
+const { ZNAME_ROLE, VYCHOZI_ROLE, vychoziRole, dataRole } = require('../src/config/vychoziRole');
 const { isManagerRole } = require('../src/utils/authz');
 
 describe('výchozí role agentury', () => {
@@ -56,6 +56,21 @@ describe('dataRole: příznaky se neberou ze schématu ani ze šablony', () => {
     expect(JSON.parse(d.permissions)).toEqual({ jen: 'tohle' });
     expect(d.isManager).toBe(true);    // ze šablony se NEBERE
     expect(d.isAppOwner).toBe(false);  // app ownera nelze získat šablonou
+  });
+
+  test('Model má svá oprávnění, ne prázdná', () => {
+    // Regrese, kterou jsem si do PR sám přinesl: `dataRole` nejdřív Model
+    // neznal, takže modelka přihlášená pozvánkou dostala roli s `{}`.
+    const d = dataRole('Model', 'agency-1', null);
+    expect(JSON.parse(d.permissions)).toEqual({ messaging: true, calendar: true });
+    expect(d.isManager).toBe(false);
+  });
+
+  test('Model se při zakládání agentury NEzakládá', () => {
+    // Modelka je `Profile`, ne účet. Role se použije až když se někdo
+    // přihlásí pozvánkou jako Model.
+    expect(ZNAME_ROLE.map((r) => r.name)).toContain('Model');
+    expect(VYCHOZI_ROLE.map((r) => r.name)).not.toContain('Model');
   });
 
   test('neznámá role nedostane manažerskou úroveň náhodou', () => {

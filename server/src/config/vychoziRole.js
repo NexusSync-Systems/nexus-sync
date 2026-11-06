@@ -25,7 +25,13 @@
 // Dvě úrovně operátorek, jak je chce provoz: běžná a vedoucí.
 // Vedoucí je manažerská úroveň — `isManagerRole()` s ní tak počítá už dnes
 // (má `senior_operator` ve svém seznamu).
-const VYCHOZI_ROLE = [
+// ZNÁMÉ role = všechny, pro které známe správné příznaky a oprávnění.
+// VÝCHOZÍ role = podmnožina, která se zakládá hned při vzniku agentury.
+//
+// „Model" sem patří, ale při zakládání agentury nevzniká: modelka je
+// v tomhle systému `Profile`, ne účet, a role se použije jen tehdy, když
+// se někdo přihlásí pozvánkou jako Model.
+const ZNAME_ROLE = [
   {
     name: 'Agency Admin',
     description: 'Plný přístup ke zdrojům agentury',
@@ -57,10 +63,20 @@ const VYCHOZI_ROLE = [
       messaging: true, calendar: true, profiles: true, web_profiles: true,
       device_setup: true, settings: true
     }
+  },
+  {
+    name: 'Model',
+    description: 'Modelka s vlastním přístupem (profil je samostatná entita)',
+    isManager: false,
+    isAppOwner: false,
+    permissions: { messaging: true, calendar: true }
   }
 ];
 
-const vychoziRole = (nazev) => VYCHOZI_ROLE.find((r) => r.name === nazev) || null;
+// Při vzniku agentury se zakládají tři — Model až na vyžádání.
+const VYCHOZI_ROLE = ZNAME_ROLE.filter((r) => r.name !== 'Model');
+
+const vychoziRole = (nazev) => ZNAME_ROLE.find((r) => r.name === nazev) || null;
 
 /** Data pro `prisma.role.create`. Šablona smí přebít jen `permissions`. */
 const dataRole = (nazev, agencyId, sablona = null) => {
@@ -77,4 +93,4 @@ const dataRole = (nazev, agencyId, sablona = null) => {
   };
 };
 
-module.exports = { VYCHOZI_ROLE, vychoziRole, dataRole };
+module.exports = { ZNAME_ROLE, VYCHOZI_ROLE, vychoziRole, dataRole };
