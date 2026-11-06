@@ -69,12 +69,34 @@ const nactiHeslo = () => {
   return fs.readFileSync(HESLO_SOUBOR, 'utf8').split('\n')[0].replace(/\r$/, '');
 };
 
-// Vynucuje všechny čtyři požadavky. Předchozí verze malé písmeno jen doufala
-// a přibližně jedno heslo z 3 800 ho nemělo — takový účet by selhal na 400
-// a zapadl mezi varováními.
+// Heslo se musí dát OPSAT, jinak je testovací účet k ničemu.
+//
+// Předchozí verze dávala `T` + 24 znaků z base64url + `a7`, tedy
+// šestadvacetiznakový šum typu `Txxxxxxxxxxxxxxxxxxxxxxxxa7`. Splňovalo to
+// všechna pravidla a bylo to k nepoužití: tyhle účty se zadávají RUČNĚ,
+// a často na telefonu s malou klávesnicí, kde se přepíná mezi velkými,
+// malými a číslicemi.
+//
+// Konkrétní vygenerované heslo tady schválně NENÍ. Je to živý přihlašovací
+// údaj a tenhle repozitář je veřejný.
+//
+// Nový vzor: `Test` + čtyři malá písmena + čtyři číslice, tedy třeba
+// `Testkofa7312`. Dvanáct znaků, žádné symboly, nic na přepínání kromě
+// číslic — a pokryje to všechny tři požadavky zod schématu naráz
+// (velké písmeno z `Test`, malá z prostředku, číslice z konce).
+//
+// Vynechaná jsou písmena a číslice, které se při diktování a opisování
+// pletou: l/I, o/O, 0, 1. Zbývá 24^4 * 8^4, tedy přes miliardu možností —
+// na účet v prázdné testovací agentuře dost, a přitom je to pořád heslo,
+// které si přečtete a opíšete.
+const PISMENA = 'abcdefghijkmnpqrstuvwxyz';   // bez 'l' a 'o'
+const CISLICE = '23456789';                    // bez '0' a '1'
 const vyrobHeslo = () => {
-  const telo = crypto.randomBytes(18).toString('base64url').replace(/[^A-Za-z0-9]/g, '');
-  return `T${telo}a7`;
+  const vyber = (zasoba, kolik) => Array.from(
+    { length: kolik },
+    () => zasoba[crypto.randomInt(zasoba.length)]
+  ).join('');
+  return `Test${vyber(PISMENA, 4)}${vyber(CISLICE, 4)}`;
 };
 
 // ── Soubor s hesly ─────────────────────────────────────────────────────────
