@@ -15,11 +15,33 @@ class SOSController {
         try {
             const { type = 'manual', lat, lng, accuracy, profileId } = req.body;
             const { userId, agencyId } = req.user;
+            const isAppOwner = req.user.role?.isAppOwner;
+
+            // `profileId` chodí z requestu, takže se musí ověřit proti agentuře
+            // volajícího — jinak šlo jméno cizího profilu protlačit do poplachu
+            // i do Telegramu. Jako `safetyController.createSession`, který to
+            // dělá od začátku.
+            //
+            // Cizí profil poplach NEZRUŠÍ, jen se zahodí. Tohle je tlačítko
+            // paniky: odmítnout celé volání kvůli špatné položce by znamenalo,
+            // že se poplach nespustí vůbec. Jméno pak vyjde z účtu volajícího.
+            let profile = null;
+            if (profileId) {
+                const kandidat = await prisma.profile.findUnique({
+                    where: { id: String(profileId) },
+                    select: { id: true, name: true, agencyId: true }
+                });
+                if (kandidat && (isAppOwner || kandidat.agencyId === agencyId)) {
+                    profile = kandidat;
+                } else {
+                    logger.warn(`SOS: ignoring profileId ${profileId} — not in agency ${agencyId}`);
+                }
+            }
 
             const alert = await prisma.sOSAlert.create({
                 data: {
                     agencyId,
-                    profileId: profileId || null,
+                    profileId: profile?.id || null,
                     userId,
                     type,
                     lat: lat || null,
@@ -33,9 +55,6 @@ class SOSController {
                 where: { id: userId },
                 select: { name: true }
             });
-            const profile = profileId
-                ? await prisma.profile.findUnique({ where: { id: profileId }, select: { name: true } })
-                : null;
 
             const displayName = profile?.name || user?.name || 'Unknown';
 
@@ -63,7 +82,7 @@ class SOSController {
             await sendSafetyPush({
                 agencyId,
                 sessionId: alert.id,
-                profileId: profileId || userId,
+                profileId: profile?.id || userId,
                 profileName: displayName,
                 type: `sos_${type}`
             });

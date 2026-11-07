@@ -395,7 +395,7 @@ class SafetyController {
 
             const profile = await prisma.profile.findUnique({
                 where: { id: profileId },
-                select: { id: true, name: true, agencyId: true }
+                select: { id: true, name: true, agencyId: true, ownerId: true }
             });
             if (!profile) return res.status(404).json({ message: 'Profile not found' });
             if (!isAppOwner && profile.agencyId !== userAgencyId) {
@@ -410,21 +410,35 @@ class SafetyController {
             // Broadcast do celé agentury nefungoval — modelka nemá profil ve svém
             // `myProfiles` (to je seznam SPRAVOVANÝCH profilů, ne "můj profil"), takže
             // si událost nevzala, zatímco operátoři ji dostávali zbytečně.
-            const recipients = await prisma.user.findMany({
+            //
+            // VLASTNÍK PROFILU je příjemce vždy a bez ohledu na název role: modelka
+            // s vlastním účtem není svým vlastním assignee, takže hledání jen přes
+            // `assignedProfiles` vracelo prázdno a fantomový hovor nedorazil nikam —
+            // zrovna u funkce, která jí má dát záminku k odchodu.
+            //
+            // Přiřazené modelky zůstávají kvůli starším datům, kde se modelka vedla
+            // jako assignee svého profilu. Název role se bere v obou podobách:
+            // výchozí role se jmenuje „Model", ručně založená bývá „Modelka".
+            const prirazeneModelky = await prisma.user.findMany({
                 where: {
                     assignedProfiles: { some: { id: profile.id } },
-                    role: { name: 'Model' }
+                    role: { name: { in: ['Model', 'Modelka'] } }
                 },
                 select: { id: true }
             });
+
+            const recipientIds = [...new Set([
+                ...(profile.ownerId ? [String(profile.ownerId)] : []),
+                ...prirazeneModelky.map((u) => u.id)
+            ])];
 
             const { getIO, getRoomSize } = require('../services/socket');
             let socketEmitted = false;
             let clientsOnline = 0;
             try {
                 const io = getIO();
-                for (const user of recipients) {
-                    const room = `user:${user.id}`;
+                for (const recipientId of recipientIds) {
+                    const room = `user:${recipientId}`;
                     io.to(room).emit('ghost_call', {
                         profileId: profile.id,
                         profileName: profile.name,
@@ -432,12 +446,12 @@ class SafetyController {
                     });
                     clientsOnline += getRoomSize(room) || 0;
                 }
-                socketEmitted = recipients.length > 0;
+                socketEmitted = recipientIds.length > 0;
             } catch (err) {
                 logger.warn(`[Ghost Call] Socket emit failed: ${err.message}`);
             }
 
-            if (!recipients.length) {
+            if (!recipientIds.length) {
                 logger.warn(`[Ghost Call] Profile ${profile.id} has no Model user linked — nobody to ring`);
             }
 
@@ -448,7 +462,7 @@ class SafetyController {
             let pushDetails = null;   // proč push neprošel — bez toho se selhání nedá diagnostikovat
             try {
                 const result = await sendGhostCallPush({
-                    userIds: recipients.map(u => u.id),
+                    userIds: recipientIds,
                     profileId: profile.id,
                     profileName: profile.name
                 });
