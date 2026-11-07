@@ -398,7 +398,7 @@ const SafetyControlCard = () => {
           */}
           <span style={{
             fontSize: '0.65rem',
-            color: phoneTrackingActive && phoneTrackingError ? 'var(--danger-color, #ef4444)' : 'var(--text-secondary)'
+            color: phoneTrackingActive && phoneTrackingError ? 'var(--error-color)' : 'var(--text-secondary)'
           }}>
             {phoneTrackingActive && phoneTrackingError
               ? (isCz ? '▲ Poloha se NEodesílá — nahlas to agentuře' : '▲ Location NOT sending — tell the agency')
