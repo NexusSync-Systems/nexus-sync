@@ -229,6 +229,69 @@ describe('GPS tracker self-pairing (phone as tracker)', () => {
     expect(res.status).toBe(400);
   });
 
+  // Modelka s vlastním účtem (#184/#185) NENÍ svým vlastním assignee — vlastní
+  // profil, neobsluhuje ho. Dokud se tu hledalo jen přes `assignedProfiles`,
+  // dostala 403 a sledování polohy vůbec nenaběhlo. U bezpečnostní funkce to
+  // bylo tím horší, že klient tu chybu polykal, takže se to nijak neprojevilo.
+  it('lets a Model pair the phone to the profile she OWNS (she is not her own assignee)', async () => {
+    prismaMock.user.findUnique.mockResolvedValue({
+      agencyId: 'agency-1',
+      ownedProfile: { id: 'profile-vlastni', agencyId: 'agency-1' },
+      assignedProfiles: []
+    });
+    prismaMock.gpsTracker.findUnique.mockResolvedValue(null);
+    prismaMock.gpsTracker.create.mockImplementation(async ({ data }) => ({ id: 'tracker-own', ...data }));
+
+    const res = await request(app)
+      .post('/api/trackers/pair-self')
+      .set('Authorization', `Bearer ${modelToken()}`)
+      .send({ installationId: 'inst_vlastnitelefon' });
+
+    expect(res.status).toBe(201);
+    expect(prismaMock.gpsTracker.create.mock.calls[0][0].data.profileId).toBe('profile-vlastni');
+  });
+
+  it('prefers the owned profile over an assigned one when none is requested', async () => {
+    prismaMock.user.findUnique.mockResolvedValue({
+      agencyId: 'agency-1',
+      ownedProfile: { id: 'profile-vlastni', agencyId: 'agency-1' },
+      assignedProfiles: [{ id: 'profile-cizi', agencyId: 'agency-1' }]
+    });
+    prismaMock.gpsTracker.findUnique.mockResolvedValue(null);
+    prismaMock.gpsTracker.create.mockImplementation(async ({ data }) => ({ id: 'tracker-own2', ...data }));
+
+    const res = await request(app)
+      .post('/api/trackers/pair-self')
+      .set('Authorization', `Bearer ${modelToken()}`)
+      .send({ installationId: 'inst_vlastnitelefon2' });
+
+    expect(res.status).toBe(201);
+    // telefon má sledovat JEJÍ profil, ne ten první přiřazený
+    expect(prismaMock.gpsTracker.create.mock.calls[0][0].data.profileId).toBe('profile-vlastni');
+  });
+
+  // Pojistka proti převzetí cizího trackeru musí vlastněný profil počítat taky,
+  // jinak by si modelka nemohla přepárovat ani svůj vlastní telefon.
+  it('lets her re-pair a phone already pinned to her OWN profile', async () => {
+    prismaMock.user.findUnique.mockResolvedValue({
+      agencyId: 'agency-1',
+      ownedProfile: { id: 'profile-vlastni', agencyId: 'agency-1' },
+      assignedProfiles: []
+    });
+    prismaMock.gpsTracker.findUnique.mockResolvedValue({
+      id: 'tracker-old', agencyId: 'agency-1', profileId: 'profile-vlastni'
+    });
+    prismaMock.gpsTracker.update.mockImplementation(async ({ data }) => ({ id: 'tracker-old', ...data }));
+
+    const res = await request(app)
+      .post('/api/trackers/pair-self')
+      .set('Authorization', `Bearer ${modelToken()}`)
+      .send({ installationId: 'inst_vlastnitelefon' });
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.gpsTracker.update).toHaveBeenCalled();
+  });
+
   it('does not let a caller take over a phone tracker paired to another profile (same agency)', async () => {
     prismaMock.user.findUnique.mockResolvedValue({
       agencyId: 'agency-1',

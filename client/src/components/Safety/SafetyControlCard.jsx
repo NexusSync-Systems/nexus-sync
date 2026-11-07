@@ -16,7 +16,7 @@ const SafetyControlCard = () => {
     batteryLevel, incomingGhostCall, setIncomingGhostCall, ghostCallScheduledAt, triggerGhostCall, verifyIdentity,
     heartRate, hrThreshold, setHrThreshold, isBluetoothConnected, setIsBluetoothConnected,
     audioSentinelActive, setAudioSentinelActive, showToast,
-    manualTrackingOn, setManualTracking, phoneTrackingActive
+    manualTrackingOn, setManualTracking, phoneTrackingActive, phoneTrackingError
   } = useNexus();
 
   const isCz = lang === 'cz' || lang === 'cs';
@@ -392,10 +392,19 @@ const SafetyControlCard = () => {
           <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>
             {lang === 'cz' ? 'Sledovat moji polohu' : 'Track my location'}
           </span>
-          <span style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>
-            {phoneTrackingActive
-              ? (lang === 'cz' ? '● Poloha se odesílá' : '● Sending location')
-              : (lang === 'cz' ? 'Zapíná se i při check-inu a SOS' : 'Also on during check-in & SOS')}
+          {/*
+            Hlásí STAV, ne přání. Dokud se chyba spárování polykala, stálo tu
+            „Poloha se odesílá" i ve chvíli, kdy server o telefonu nevěděl.
+          */}
+          <span style={{
+            fontSize: '0.65rem',
+            color: phoneTrackingActive && phoneTrackingError ? 'var(--error-color)' : 'var(--text-secondary)'
+          }}>
+            {phoneTrackingActive && phoneTrackingError
+              ? (isCz ? '▲ Poloha se NEodesílá — nahlas to agentuře' : '▲ Location NOT sending — tell the agency')
+              : phoneTrackingActive
+                ? (isCz ? '● Poloha se odesílá' : '● Sending location')
+                : (isCz ? 'Zapíná se i při check-inu a SOS' : 'Also on during check-in & SOS')}
           </span>
         </div>
         <div style={{

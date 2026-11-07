@@ -247,9 +247,9 @@ class TrackerController {
   }
 
   // Self-pairing: a Model provisions THEIR OWN phone as a tracker (phone-as-GPS).
-  // No manager role needed — but they can only pair to a profile assigned to them,
-  // and the phone is keyed by its installationId (pseudo-IMEI, prefixed so it can't
-  // collide with a real hardware IMEI).
+  // No manager role needed — but they can only pair to a profile they own or that is
+  // assigned to them, and the phone is keyed by its installationId (pseudo-IMEI,
+  // prefixed so it can't collide with a real hardware IMEI).
   async pairSelf(req, res) {
     try {
       const userId = req.user?.userId;
@@ -260,11 +260,27 @@ class TrackerController {
 
       const user = await prisma.user.findUnique({
         where: { id: userId },
-        select: { agencyId: true, assignedProfiles: { select: { id: true, agencyId: true } } }
+        select: {
+          agencyId: true,
+          // Vlastněný profil JE „její profil". Modelka není svým vlastním
+          // assignee (`Profile.owner` vs `Profile.assignees`), takže dokud se
+          // hledalo jen přes přiřazení, účet modelky tu dostal 403 a sledování
+          // polohy vůbec nenaběhlo — mlčky, protože klient chybu polykal.
+          ownedProfile: { select: { id: true, agencyId: true } },
+          assignedProfiles: { select: { id: true, agencyId: true } }
+        }
       });
       if (!user) return res.status(404).json({ message: 'User not found' });
 
-      const ownProfiles = user.assignedProfiles || [];
+      // Vlastnictví je první v pořadí: když je modelka omylem přiřazená i k cizímu
+      // profilu, telefon má sledovat ten její, ne ten první přiřazený.
+      const ownProfiles = [];
+      for (const kandidat of [user.ownedProfile, ...(user.assignedProfiles || [])]) {
+        if (kandidat && !ownProfiles.some((jiz) => jiz.id === kandidat.id)) {
+          ownProfiles.push(kandidat);
+        }
+      }
+
       const requestedProfileId = req.body?.profileId;
       const profile = requestedProfileId
         ? ownProfiles.find(p => p.id === requestedProfileId)

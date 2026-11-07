@@ -137,6 +137,41 @@ describe('POST /api/sos', () => {
 
     expect(res.status).toBe(201);
   });
+
+  // `profileId` chodí z requestu. Bez kontroly agentury šlo jméno cizího
+  // profilu protlačit do poplachu i do zprávy na Telegram.
+  it('ignores a profileId from another agency but still raises the alarm', async () => {
+    prismaMock.sOSAlert.create.mockImplementation(async ({ data }) => ({
+      id: 'sos2', status: 'active', createdAt: new Date(), ...data
+    }));
+    prismaMock.profile.findUnique.mockResolvedValue({ id: 'p-cizi', name: 'Cizi modelka', agencyId: 'agency-9' });
+    prismaMock.user.findUnique.mockResolvedValue({ id: 'user-1', name: 'Test' });
+
+    const res = await request(app)
+      .post('/api/sos')
+      .set('Authorization', `Bearer ${makeToken()}`)
+      .send({ type: 'manual', profileId: 'p-cizi' });
+
+    // Tlačítko paniky se kvůli špatné položce NESMÍ odmítnout — jen se zahodí.
+    expect(res.status).toBe(201);
+    expect(prismaMock.sOSAlert.create.mock.calls[0][0].data.profileId).toBeNull();
+  });
+
+  it('keeps a profileId from the caller agency', async () => {
+    prismaMock.sOSAlert.create.mockImplementation(async ({ data }) => ({
+      id: 'sos3', status: 'active', createdAt: new Date(), ...data
+    }));
+    prismaMock.profile.findUnique.mockResolvedValue({ id: 'p-moje', name: 'Diana', agencyId: 'agency-1' });
+    prismaMock.user.findUnique.mockResolvedValue({ id: 'user-1', name: 'Test' });
+
+    const res = await request(app)
+      .post('/api/sos')
+      .set('Authorization', `Bearer ${makeToken()}`)
+      .send({ type: 'manual', profileId: 'p-moje' });
+
+    expect(res.status).toBe(201);
+    expect(prismaMock.sOSAlert.create.mock.calls[0][0].data.profileId).toBe('p-moje');
+  });
 });
 
 describe('Safety sessions', () => {
