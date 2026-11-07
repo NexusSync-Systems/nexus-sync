@@ -107,6 +107,65 @@ describe('POST /api/safety/ghost-call', () => {
     expect(mockEmit).not.toHaveBeenCalled();
   });
 
+  // Jádro: modelka s vlastním účtem vlastní profil, ale není jeho assignee.
+  // Dokud se příjemci hledali jen přes `assignedProfiles`, byl seznam prázdný
+  // a fantomový hovor nedorazil nikam — u funkce, která jí má dát záminku
+  // k odchodu ze schůzky.
+  it('rings the profile OWNER even when nobody is assigned to the profile', async () => {
+    prisma.profile.findUnique.mockResolvedValue({
+      id: 'p1', name: 'Diana', agencyId: 'agency-1', ownerId: 'model-owner-1'
+    });
+    prisma.user.findMany.mockResolvedValue([]);   // žádná přiřazená modelka
+
+    const res = await request(app)
+      .post('/api/safety/ghost-call')
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ profileId: 'p1' });
+
+    expect(res.status).toBe(200);
+    expect(mockTo).toHaveBeenCalledWith('user:model-owner-1');
+    expect(mockSendGhostCallPush).toHaveBeenCalledWith(
+      expect.objectContaining({ userIds: ['model-owner-1'] })
+    );
+  });
+
+  it('does not ring the owner twice when she is also an assignee', async () => {
+    prisma.profile.findUnique.mockResolvedValue({
+      id: 'p1', name: 'Diana', agencyId: 'agency-1', ownerId: 'model-1'
+    });
+    prisma.user.findMany.mockResolvedValue([{ id: 'model-1' }]);
+
+    const res = await request(app)
+      .post('/api/safety/ghost-call')
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ profileId: 'p1' });
+
+    expect(res.status).toBe(200);
+    expect(mockTo).toHaveBeenCalledTimes(1);
+    expect(mockSendGhostCallPush).toHaveBeenCalledWith(
+      expect.objectContaining({ userIds: ['model-1'] })
+    );
+  });
+
+  // Výchozí role se jmenuje „Model", ale ručně založená bývá „Modelka" —
+  // u staršího profilu bez vlastníka je název role jediné, podle čeho to jde.
+  it('accepts both spellings of the model role name for assignees', async () => {
+    prisma.profile.findUnique.mockResolvedValue({
+      id: 'p1', name: 'Diana', agencyId: 'agency-1', ownerId: null
+    });
+
+    await request(app)
+      .post('/api/safety/ghost-call')
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ profileId: 'p1' });
+
+    expect(prisma.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ role: { name: { in: ['Model', 'Modelka'] } } })
+      })
+    );
+  });
+
   it("refuses to ring another agency's model", async () => {
     prisma.profile.findUnique.mockResolvedValue({ id: 'p9', name: 'Foreign', agencyId: 'other-agency' });
 

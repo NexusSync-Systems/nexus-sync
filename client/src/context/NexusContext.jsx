@@ -667,6 +667,12 @@ export const NexusProvider = ({ children }) => {
   // Reaktivní stav zámku — když ho App Owner přepne, efekt níž se přehodnotí.
   const phoneTrackingLocked = useFeatureLock('phone-tracking');
 
+  // Proč sledování neběží, i když ho stav zapnul. Bez tohohle kartička tvrdila
+  // „● Poloha se odesílá" podle PŘÁNÍ, ne podle skutečnosti: spárování telefonu
+  // mohlo skončit chybou a `.catch(() => {})` ji zahodilo. U bezpečnostní funkce
+  // je mlčky nefunkční stav horší než vypnutá funkce.
+  const [phoneTrackingError, setPhoneTrackingError] = useState(null);
+
   useEffect(() => {
     const roleUpper = String(activeOperator?.role?.name || activeOperator?.role || '')
       .toUpperCase().replace(/\s+/g, '_');
@@ -681,9 +687,21 @@ export const NexusProvider = ({ children }) => {
       // Bez installationId by sledování tiše neběželo — u bezpečnostní funkce
       // nepřípustné. Když ID chybí, vygenerujeme a uložíme ho (stabilní pseudo-IMEI).
       const installationId = getOrCreateInstallationId();
-      if (installationId) ensurePhoneTracking(API_BASE, token, installationId).catch(() => {});
+      // Stav se hlásí až z výsledku, ne synchronně v těle efektu.
+      Promise.resolve(installationId ? ensurePhoneTracking(API_BASE, token, installationId) : false)
+        .then((bezi) => {
+          if (bezi) return setPhoneTrackingError(null);
+          return setPhoneTrackingError(installationId ? 'notRunning' : 'noInstallationId');
+        })
+        .catch((err) => {
+          const stav = err?.response?.status;
+          console.error('[Safety] Sledování polohy se nespustilo:', stav || err?.message);
+          setPhoneTrackingError(stav === 403 ? 'noProfile' : 'failed');
+        });
     } else {
-      stopPhoneTracking().catch(() => {});
+      stopPhoneTracking()
+        .catch(() => {})
+        .finally(() => setPhoneTrackingError(null));
     }
   }, [phoneTrackingActive, phoneTrackingLocked, isNativeApp, token, activeOperator]);
 
@@ -1007,7 +1025,7 @@ export const NexusProvider = ({ children }) => {
     voiceGuardianActive, handleToggleVoiceGuardian,
     audioSentinelActive, setAudioSentinelActive,
     sosActive: _sosActive, triggerSOS, cancelSOS,
-    manualTrackingOn, setManualTracking, phoneTrackingActive,
+    manualTrackingOn, setManualTracking, phoneTrackingActive, phoneTrackingError,
     linkedSessionId, setLinkedSessionId, checkinMinutes, setCheckinMinutes,
     checkinTimerEnd, checkinRemaining, startCheckinTimer, resetCheckinTimer, confirmDeparture,
     SAFETY_SUGGESTIONS: ['15m', '30m', '45m', '60m', '1.5h', '2h'],
@@ -1051,7 +1069,7 @@ export const NexusProvider = ({ children }) => {
     nexusData.updatePlans, nexusData.isPlansLoading, nexusData.isStartingSubscription, nexusData.onStartSubscription,
     nexusData.onCancelSubscription, nexusData.startCheckout, nexusData.startBillingPortal, daysLeft,
     voiceGuardianActive, handleToggleVoiceGuardian, audioSentinelActive, _sosActive, triggerSOS, cancelSOS,
-    manualTrackingOn, setManualTracking, phoneTrackingActive,
+    manualTrackingOn, setManualTracking, phoneTrackingActive, phoneTrackingError,
     linkedSessionId, checkinMinutes, checkinTimerEnd, checkinRemaining, startCheckinTimer, resetCheckinTimer, confirmDeparture,
     nexusData.handleDelayBooking, nexusData.trackers, linkedTracker, lastTrackerUpdate, nexusData.trackerProvisioning,
     nexusData.isPairingTracker, nexusData.handlePairTracker, nexusData.handleUnpairTracker, gpsHistory,
