@@ -346,6 +346,13 @@ const verifyDeviceBinding = z.object({
   installationId: z.string().min(1).max(256),
   profileId: z.string().min(1).max(128).optional().nullable(),
   platform: z.enum(['android', 'ios', 'web']).optional().default('android'),
+  // Relay telefon se SIM kartou, nebo plná aplikace. Schválně `string`,
+  // ne `enum`: neznámou hodnotu srovná `normalizujVariantu` na relay.
+  // Kdyby tady stál enum, nové nebo pokažené APK by párování dostalo
+  // 400 — tedy telefon, který vůbec nefunguje, místo telefonu, který
+  // se bere jako relay. Párování je poslední místo, kde chceme být
+  // přísní na formu.
+  appVariant: z.string().max(32).optional().nullable(),
   model: z.string().max(200).optional().nullable(),
   deviceName: z.string().max(200).optional().nullable(),
   deviceModel: z.string().max(200).optional().nullable(),

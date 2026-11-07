@@ -1,4 +1,5 @@
 const prisma = require('./db');
+const { JEN_RELAY } = require('../utils/deviceVariants');
 const logger = require('./logger');
 const { sendAlert } = require('./alertService');
 const fs = require('fs');
@@ -144,8 +145,13 @@ class MonitoringService {
     let offlineBindings = [];
 
     try {
+      // `...JEN_RELAY`: hlídá se relay telefon. Plná aplikace modelky má
+      // od #188 vlastní vazbu, ale `lastSeenAt` jí obnovuje jen příchozí
+      // SMS, dotaz na outbox a SIP ping — tedy nic, co plná aplikace dělá.
+      // Bez filtru by tedy zahlcovala poplach „relay je offline" vždy.
       offlineBindings = await prisma.deviceBinding.findMany({
         where: {
+          ...JEN_RELAY,
           active: true,
           lastSeenAt: { lt: minutesAgoCutoff(now, thresholdMinutes) }
         },

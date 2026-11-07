@@ -1,5 +1,6 @@
 const admin = require('firebase-admin');
 const prisma = require('./db');
+const { JEN_RELAY } = require('../utils/deviceVariants');
 
 const path = require('path');
 
@@ -295,10 +296,13 @@ const sendSafetyPush = async ({ agencyId, sessionId, profileId, profileName, typ
 };
 
 const sendRelaySmsPush = async ({ agencyId, profileId, to, text, messageId }) => {
-  // 1. Find the bound device for this profile to get the specific user/tokens
+  // 1. Find the bound RELAY device for this profile to get the specific user/tokens.
+  //    Plná aplikace modelky má od #188 vlastní vazbu na stejný profil,
+  //    ale odeslat SMS přes SIM kartu umí jedině relay.
   const binding = await prisma.deviceBinding.findFirst({
     where: { 
       profileId, 
+      ...JEN_RELAY,
       active: true,
       ...(agencyId ? { agencyId } : {})
     },
@@ -376,10 +380,11 @@ const sendGhostCallPush = async ({ userIds = [], profileId, profileName }) => {
 };
 
 const sendRelaySyncPush = async ({ agencyId, profileId, externalId }) => {
-  // 1. Find the bound device for this profile
+  // 1. Find the bound RELAY device for this profile (viz sendRelaySmsPush)
   const binding = await prisma.deviceBinding.findFirst({
     where: { 
       profileId, 
+      ...JEN_RELAY,
       active: true,
       ...(agencyId ? { agencyId } : {})
     },

@@ -1,4 +1,5 @@
 const prisma = require('../services/db');
+const { JEN_RELAY } = require('../utils/deviceVariants');
 const logger = require('../services/logger');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
@@ -244,9 +245,15 @@ exports.getRelayStatus = async (req, res) => {
     // lastSeenAt je oproti tomu skutečný tep zařízení — obnovuje ho příchozí
     // SMS (handleRelay), dotaz na outbox (getOutbox) i SIP ping.
     const cerstve = new Date(Date.now() - RELAY_ONLINE_MS);
+    // `...JEN_RELAY`: počítají se relay telefony, ne všechna spárovaná
+    // zařízení. Plná aplikace modelky má od #188 vlastní vazbu a bez
+    // tohoto filtru by hlásila „relay je online" i tehdy, když relay
+    // telefon leží vybitý doma — tedy přesně v situaci, kvůli které se
+    // ten ukazatel sleduje.
     const activeRelays = await prisma.deviceBinding.count({
       where: {
         agencyId: String(agencyId),
+        ...JEN_RELAY,
         active: true,
         lastSeenAt: { gte: cerstve },
       },

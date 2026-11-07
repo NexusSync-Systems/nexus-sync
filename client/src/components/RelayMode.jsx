@@ -583,6 +583,8 @@ const RelayMode = ({ operator, t, onHide: _onHide, onExit, syncPushToken, isSync
       await axios.post(`${RELAY_API_BASE}/api/device/verify`, {
         installationId,
         profileId: operator?.profileId,
+        // Relay režim je relay, i když běží v plném balíku (viz #188).
+        appVariant: 'relay',
         platform,
         model,
         deviceName

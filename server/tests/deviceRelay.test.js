@@ -135,9 +135,13 @@ describe('POST /api/device/verify', () => {
         active: true,
       }),
     });
+    // `appVariant` ve filtru: deaktivují se jen ostatní vazby TÉŽE varianty.
+    // Tenhle požadavek pole neposlal, takže se bere jako relay — a vazba
+    // plné aplikace stejného profilu musí zůstat aktivní (#188).
     expect(prismaMock.deviceBinding.updateMany).toHaveBeenCalledWith({
       where: {
         profileId: 'profile-1',
+        appVariant: 'relay',
         NOT: { installationId: INSTALLATION_ID },
         active: true,
       },

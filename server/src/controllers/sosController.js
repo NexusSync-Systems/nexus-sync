@@ -1,4 +1,5 @@
 const prisma = require('../services/db');
+const { JEN_RELAY } = require('../utils/deviceVariants');
 const logger = require('../services/logger');
 const { getIO } = require('../services/socket');
 const { sendAlert } = require('../services/alertService');
@@ -253,9 +254,15 @@ class SOSController {
                 return res.status(403).json({ message: 'Access denied' });
             }
 
-            // Find active device binding for target
+            // Find active RELAY device binding for target.
+            //
+            // Tahle cesta posílá `fake_call_request`, který poslouchá
+            // jedině relay (RelayMode.jsx). Plná aplikace má svůj vlastní
+            // fantomový hovor přes `ghost_call` v safetyController, takže
+            // bez filtru by se sem mohla vybrat vazba plné aplikace a
+            // signál by skončil v prázdnu.
             const binding = await prisma.deviceBinding.findFirst({
-                where: { userId: targetUserId, active: true },
+                where: { userId: targetUserId, ...JEN_RELAY, active: true },
                 select: { installationId: true }
             });
 

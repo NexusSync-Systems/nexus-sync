@@ -1,5 +1,6 @@
 const { getIO } = require('../services/socket');
 const prisma = require('../services/db');
+const { JEN_RELAY } = require('../utils/deviceVariants');
 
 // `incomingSms` a route POST /api/sms/incoming jsou odstraněné.
 //
@@ -53,7 +54,10 @@ exports.sendSms = async (req, res) => {
     // Volitelné `installationId` dovolí poslat z konkrétního telefonu.
     // Filtr na agencyId tu musí zůstat i tak, jinak by se dal cizí telefon
     // adresovat jeho identifikátorem.
-    const kde = { agencyId: String(agencyId), active: true };
+    // `...JEN_RELAY`: odeslat SMS umí jedině relay telefon se SIM kartou.
+    // Plná aplikace modelky je od #188 taky spárované zařízení téhož
+    // profilu, a bez tohoto filtru by se dostala do výběru jako kandidát.
+    const kde = { agencyId: String(agencyId), ...JEN_RELAY, active: true };
     if (installationId) kde.installationId = String(installationId);
 
     const zarizeni = await prisma.deviceBinding.findMany({
