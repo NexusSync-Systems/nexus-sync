@@ -6,6 +6,7 @@ const logger = require('../services/logger');
 const { secureCompare, deriveRelaySecret } = require('../utils/security');
 const { getPhoneLookupValues, normalizePhoneNumber } = require('../utils/phoneNumber');
 const { isAppOwnerRole, isManagerRole } = require('../utils/authz');
+const { normalizujVariantu } = require('../utils/deviceVariants');
 
 const RELAY_SMS_DUPLICATE_WINDOW_MS = 2 * 60 * 1000;
 
@@ -123,7 +124,7 @@ exports.verifyDeviceBinding = async (req, res) => {
     
     const roleName = (typeof userRole === 'string' ? userRole : userRole?.name) || '';
     const internalRole = roleName.toUpperCase();
-    const { installationId, profileId, platform, model, deviceModel, deviceName } = req.body;
+    const { installationId, profileId, platform, model, deviceModel, deviceName, appVariant } = req.body;
 
     // RBAC: RESTRICTED for Modelka (they shouldn't be binding new devices usually, but let's be more permissive than the current block)
     // The previous block was way too aggressive, blocking even admins.
@@ -140,7 +141,13 @@ exports.verifyDeviceBinding = async (req, res) => {
 
     const resolvedModel = model || deviceModel || null;
 
-    console.info(`[Device Binding] Attempting: installationId=${installationId}, userId=${userId}, role=${internalRole}, model=${resolvedModel}`);
+    // Která aplikace se to hlásí. Relay telefon se SIM kartou a plná
+    // aplikace modelky jsou dva různé telefony s různým installationId,
+    // takže každý má vlastní vazbu — ale jen v rámci své varianty.
+    // Neznámá a chybějící hodnota je `relay`, viz deviceVariants.js.
+    const varianta = normalizujVariantu(appVariant);
+
+    console.info(`[Device Binding] Attempting: installationId=${installationId}, userId=${userId}, role=${internalRole}, model=${resolvedModel}, appVariant=${varianta}`);
 
     let resolvedProfileId = null;
     if (profileId) {
@@ -187,15 +194,23 @@ exports.verifyDeviceBinding = async (req, res) => {
 
     await prisma.deviceBinding.upsert({
       where: { installationId },
-      update: { userId: String(userId), agencyId: String(agencyId), profileId: String(resolvedProfileId), platform: String(platform || 'android'), active: true, model: resolvedModel, deviceName, lastSeenAt: new Date() },
-      create: { installationId, userId: String(userId), agencyId: String(agencyId), profileId: String(resolvedProfileId), platform: String(platform || 'android'), active: true, model: resolvedModel, deviceName, lastSeenAt: new Date() },
+      update: { userId: String(userId), agencyId: String(agencyId), profileId: String(resolvedProfileId), platform: String(platform || 'android'), appVariant: varianta, active: true, model: resolvedModel, deviceName, lastSeenAt: new Date() },
+      create: { installationId, userId: String(userId), agencyId: String(agencyId), profileId: String(resolvedProfileId), platform: String(platform || 'android'), appVariant: varianta, active: true, model: resolvedModel, deviceName, lastSeenAt: new Date() },
     });
 
-    // Deactivate redundant bindings for this profile instead of deleting them
+    // Na profil zůstává jedna vazba OD KAŽDÉ VARIANTY, ne jedna celkem.
+    //
+    // Smysl téhle deaktivace je, aby po výměně telefonu nezůstala v chodu
+    // vazba toho starého. Dokud ale nerozlišovala variantu, brala
+    // i telefon, který dělá něco jiného: přihlášení modelky v plné
+    // aplikaci vyřadilo její relay se SIM kartou (a tím příjem SMS),
+    // spárování relaye zase vyřadilo plnou aplikaci. Oba telefony jsou
+    // přitom spárované správně a mají tu být zároveň.
     if (resolvedProfileId) {
       await prisma.deviceBinding.updateMany({
         where: {
           profileId: String(resolvedProfileId),
+          appVariant: varianta,
           NOT: { installationId },
           active: true
         },

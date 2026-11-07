@@ -6,6 +6,24 @@ import * as tokenStore from '../services/tokenStore';
 import { generateSecureInstallationId } from '../utils/installationId';
 
 /**
+ * Čím se tahle aplikace páruje: relay telefon se SIM kartou, nebo plná
+ * aplikace. Server podle toho drží dvě nezávislé vazby na jeden profil —
+ * jinak si je modelčin relay a její plná aplikace přehazují (viz #188).
+ *
+ * Tři zdroje, protože každý sám o sobě má slepé místo: varianta buildu
+ * (`__APP_VARIANT__`) platí pro APK, `?mode=relay` pro relay v prohlížeči
+ * a applicationId pro případ, že by se relay sestavil bez té konstanty.
+ */
+const zjistiVariantuAplikace = (deviceInfo) => {
+  if (typeof __APP_VARIANT__ !== 'undefined' && __APP_VARIANT__ === 'relay') return 'relay';
+  if (deviceInfo?.id === 'com.nexushub.relay') return 'relay';
+  try {
+    if (new URLSearchParams(window.location.search).get('mode') === 'relay') return 'relay';
+  } catch (_err) { /* bez window se rozhoduje podle buildu */ }
+  return 'full';
+};
+
+/**
  * Custom hook to manage authentication state and logic for Nexus Hub.
  */
 export function useAuth({ API_BASE, _t, setIsRelayMode, _setSelectedChatId, _setActiveProfileId, setShowLanding }) {
@@ -234,6 +252,7 @@ export function useAuth({ API_BASE, _t, setIsRelayMode, _setSelectedChatId, _set
       const verifyRes = await axios.post(`${API_BASE}/device/verify`, {
         installationId,
         profileId: operator.profileId || operator.activeProfileId || null,
+        appVariant: zjistiVariantuAplikace(info),
         model: info.model,
         platform: info.platform,
         deviceName: info.name || deviceId || 'Nexus Relay'

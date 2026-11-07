@@ -163,6 +163,12 @@ model DeviceBinding {
   profileId      String?
   profile        Profile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
   platform       String   @default("android")
+  // Která aplikace na tom telefonu je: "relay" (SIM, přijímá SMS) nebo
+  // "full" (plná aplikace — kalendář, zprávy, bezpečnostní tlačítka).
+  // Modelka má obojí, každé s vlastním installationId. Bez tohoto pole si
+  // obě vazby přehazovaly jednu jedinou aktivní vazbu profilu.
+  // Výchozí "relay" drží v chodu starší APK i řádky z doby před migrací.
+  appVariant     String   @default("relay")
   active         Boolean  @default(true)
   model          String?
   deviceName     String?
@@ -177,6 +183,8 @@ model DeviceBinding {
   @@index([agencyId])
   @@index([userId])
   @@index([profileId])
+  @@index([agencyId, appVariant, active])
+  @@index([profileId, appVariant, active])
 }
 
 // VoIP "bring your own trunk" — každá agentura si konfiguruje vlastního SIP

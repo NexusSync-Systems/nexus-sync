@@ -349,6 +349,9 @@ const RelayDashboard = () => {
         const vr = await axios.post(url, {
           installationId: localStorage.getItem('nexus_installation_id'),
           profileId: relayProfileId,
+          // Tohle je relay. Server tak nechá vazbu plné aplikace téhož
+          // profilu na pokoji — dřív ji párování relaye vyřadilo (#188).
+          appVariant: 'relay',
           platform: isNativeApp ? 'android' : 'web',
           model: 'RelayApp',
           deviceName: 'Nexus Relay'
