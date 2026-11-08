@@ -41,6 +41,17 @@ jobs:
     name: Bezpečnostní kontrola
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Na úrovni úlohy, ne kroku: klíč cache níž je potřebuje taky.
+    env:
+      # Pevná verze: nástroj, který se sám aktualizuje, mění výsledky
+      # mezi běhy a pak není poznat, jestli přibyl nález, nebo pravidlo.
+      GITLEAKS_VERZE: '8.18.4'
+      # Kontrolní součet ROZBALENÉ binárky (ne archivu). Ověřeno proti
+      # `gitleaks_8.18.4_checksums.txt` z téhož vydání: součet archivu
+      # souhlasí s tím, co vydává upstream, a tahle hodnota je z něj.
+      # Při zvednutí verze se MUSÍ zvednout i tohle, jinak krok spadne
+      # na nesouhlasu součtu — což je záměr, ne nehoda.
+      GITLEAKS_SHA256: '46a05260e7cce527f132cb618de59d22262b8b5eb47f66c288447b95c7a98b7e'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -97,22 +108,81 @@ jobs:
       # zastavit — tajemství v historii se nedá smazat a každá hodina navíc
       # je hodina, kdy je venku.
       #
-      # Taky se nespouští na pozadí: když se nástroj nepodaří stáhnout nebo
-      # spustit, krok SPADNE. Bezpečnostní kontrola, která tiše neproběhla,
+      # Taky se nespouští na pozadí: ani jeden z těch dvou kroků nemá
+      # `continue-on-error`, takže když se nástroj nepodaří připravit nebo
+      # spustit, běh SPADNE. Bezpečnostní kontrola, která tiše neproběhla,
       # je horší než žádná, protože vypadá jako zelená.
+
+      # ── Nástroj z cache, ne ze sítě při každém běhu ──────────────────────
+      #
+      # Důvod je provozní: 8. 11. 2026 stahování spadlo na
+      # `curl: (56) Connection died, tried 5 times before giving up` a brána
+      # správně zavřela — jenže tím se kvůli výpadku cizí sítě nedalo sloučit
+      # vůbec nic. Fail-closed zůstává (výpadek NEJDE obejít přeskočením
+      # kontroly), ubývá jen těch stahování.
+      #
+      # POZOR, cache je úložiště, DO KTERÉHO SE DÁ ZAPSAT z jiné větve téhož
+      # repozitáře. Kdyby se do ní podstrčila binárka, která jen vrátí nulu,
+      # kontrola tajemství by hlásila čisto a nepoznal by to nikdo — tedy
+      # přesně to tiché selhání, kterému se celá tahle úloha vyhýbá. Proto se
+      # nástroj po obnovení z cache VŽDY ověřuje proti pevnému kontrolnímu
+      # součtu a při nesouhlasu se stahuje znovu. Je to zároveň pojistka,
+      # kterou úloha dřív neměla vůbec: neprojde ani podstrčený archiv
+      # z Releases.
+      #
+      # Nástroj leží v `$RUNNER_TEMP`, ne v pracovním stromu. Gitleaks
+      # v režimu `--no-git` prohledává `.`, takže by jinak prohledával sám
+      # sebe.
+      - name: Cache nástroje gitleaks
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/nastroje
+          # V klíči je verze i součet: po zvednutí verze se stará položka
+          # nepoužije, místo aby tiše zůstala ležet.
+          key: gitleaks-${{ env.GITLEAKS_VERZE }}-${{ env.GITLEAKS_SHA256 }}-linux-x64
+
+      - name: Připravit gitleaks
+        run: |
+          set -uo pipefail
+          mkdir -p "$RUNNER_TEMP/nastroje"
+          CIL="$RUNNER_TEMP/nastroje/gitleaks"
+
+          overit() {
+            [ -x "$1" ] || return 1
+            echo "${GITLEAKS_SHA256}  $1" | sha256sum --check --status
+          }
+
+          if overit "$CIL"; then
+            echo "Gitleaks je v cache a kontrolní součet souhlasí, nestahuje se."
+            exit 0
+          fi
+
+          if [ -e "$CIL" ]; then
+            echo "::warning::Gitleaks z cache NESOUHLASÍ s očekávaným součtem. Zahazuji ho a stahuji znovu."
+            rm -f "$CIL"
+          fi
+
+          # Stahuje se jinam a na cílové místo se nástroj přesune TEPRVE po
+          # ověření. Kdyby se psalo přímo do cesty, kterou ukládá cache,
+          # uložila by se i binárka z nepodařeného běhu.
+          STAZ="$(mktemp -d)"
+          curl -sSfL -o "$STAZ/gitleaks.tar.gz" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERZE}/gitleaks_${GITLEAKS_VERZE}_linux_x64.tar.gz" \
+            || { echo "::error::Gitleaks se nepodařilo stáhnout — kontrola tajemství NEPROBĚHLA."; exit 1; }
+          tar -xzf "$STAZ/gitleaks.tar.gz" -C "$STAZ" gitleaks \
+            || { echo "::error::Archiv gitleaks nejde rozbalit — kontrola tajemství NEPROBĚHLA."; exit 1; }
+          chmod +x "$STAZ/gitleaks"
+
+          overit "$STAZ/gitleaks" \
+            || { echo "::error::Stažený gitleaks NEODPOVÍDÁ očekávanému součtu ${GITLEAKS_SHA256} — kontrola tajemství NEPROBĚHLA."; exit 1; }
+
+          mv "$STAZ/gitleaks" "$CIL"
+          echo "Gitleaks stažen a ověřen."
+
       - name: Tajemství v historii gitu
-        env:
-          # Pevná verze: nástroj, který se sám aktualizuje, mění výsledky
-          # mezi běhy a pak není poznat, jestli přibyl nález, nebo pravidlo.
-          GITLEAKS_VERZE: '8.18.4'
         run: |
           set -uo pipefail
           mkdir -p vysledky
-          curl -sSfL -o gitleaks.tar.gz \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERZE}/gitleaks_${GITLEAKS_VERZE}_linux_x64.tar.gz" \
-            || { echo "::error::Gitleaks se nepodařilo stáhnout — kontrola tajemství NEPROBĚHLA."; exit 1; }
-          tar -xzf gitleaks.tar.gz gitleaks \
-            || { echo "::error::Archiv gitleaks nejde rozbalit — kontrola tajemství NEPROBĚHLA."; exit 1; }
 
           # ── Proč to není prostě „prohledej celou historii" ──────────────
           #
@@ -149,7 +219,7 @@ jobs:
           #
           # `--exit-code 1`: nález teď běh ZASTAVÍ. Viz komentář u kroku výš.
           # shellcheck disable=SC2086
-          ./gitleaks detect \
+          "$RUNNER_TEMP/nastroje/gitleaks" detect \
             --config .gitleaks.toml \
             --source . \
             $ROZSAH \
