@@ -1,17 +1,19 @@
 import React from 'react';
 import { useNexus } from '../../context/ContextHook';
 import UpdateBanner from '../UpdateBanner';
+import StavSpojeniPruh from './StavSpojeniPruh';
 
 /**
  * Component to handle global UI banners such as Maintenance Mode and Global Announcements.
  * Separates utility UI from main application layout.
  */
 const SystemBanners = () => {
-  const { isMaintenanceMode, globalAnnouncement, isMobile } = useNexus();
+  const { isMaintenanceMode, globalAnnouncement, isMobile, lang } = useNexus();
 
   return (
     <>
       <UpdateBanner />
+      <StavSpojeniPruh lang={lang} />
       {/* Maintenance Banner */}
       {isMaintenanceMode && (
         <div style={{

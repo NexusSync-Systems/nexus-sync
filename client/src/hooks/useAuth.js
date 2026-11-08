@@ -4,6 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { Device } from '@capacitor/device';
 import * as tokenStore from '../services/tokenStore';
 import { generateSecureInstallationId } from '../utils/installationId';
+import { prodlevaObnovy } from '../utils/obnovaSpojeni';
 
 /**
  * Čím se tahle aplikace páruje: relay telefon se SIM kartou, nebo plná
@@ -110,6 +111,23 @@ export function useAuth({ API_BASE, _t, setIsRelayMode, _setSelectedChatId, _set
   }, [API_BASE, handleLogoutInternal]);
 
   const refreshPromiseRef = useRef(null);
+  // Opakování obnovy tokenu po síťové chybě. Bez něj stačila jediná neúspěšná
+  // obnova (vteřina bez sítě, restart backendu při nasazení) a sezení bylo
+  // tiše mrtvé až do obnovení stránky: naplánovaná obnova už se nikdy
+  // nezopakovala, protože se plánuje jen při ZMĚNĚ tokenu — a ta nepřišla.
+  const obnovaPokusRef = useRef(0);
+  const obnovaTimerRef = useRef(null);
+
+  const naplanujOpakovaniObnovy = useCallback(() => {
+    if (obnovaTimerRef.current) return;
+    obnovaPokusRef.current += 1;
+    const prodleva = prodlevaObnovy(obnovaPokusRef.current);
+    console.warn(`[Auth] Obnova tokenu selhala, další pokus za ${Math.round(prodleva / 1000)} s`);
+    obnovaTimerRef.current = setTimeout(() => {
+      obnovaTimerRef.current = null;
+      scheduleTokenRefreshRef.current?.(0);
+    }, prodleva);
+  }, []);
 
   const performRefresh = useCallback(async () => {
     if (refreshPromiseRef.current) return refreshPromiseRef.current;
@@ -141,14 +159,20 @@ export function useAuth({ API_BASE, _t, setIsRelayMode, _setSelectedChatId, _set
             scheduleTokenRefreshRef.current(data.expiresIn || 3600);
           }
           console.log('[Auth] Token refreshed');
+          obnovaPokusRef.current = 0;
           return data.token;
         } else {
+          // Odmítnutí serverem je definitivní odpověď (odhlášený refresh
+          // token) — opakování by nepomohlo, tady se odhlašuje správně.
           console.warn('[Auth] Refresh failed, logging out');
           handleLogoutInternal();
           return null;
         }
       } catch (_err) {
+        // Síťová chyba NENÍ odmítnutí: refresh token může být pořád platný,
+        // takže se neodhlašujeme, ale zkusíme to znovu.
         console.error('[Auth] Refresh _err:', _err);
+        naplanujOpakovaniObnovy();
         return null;
       } finally {
         refreshPromiseRef.current = null;
@@ -156,7 +180,7 @@ export function useAuth({ API_BASE, _t, setIsRelayMode, _setSelectedChatId, _set
     })();
 
     return refreshPromiseRef.current;
-  }, [API_BASE, handleLogoutInternal, setShowLanding, isNativeApp]);
+  }, [API_BASE, handleLogoutInternal, setShowLanding, isNativeApp, naplanujOpakovaniObnovy]);
 
   const scheduleTokenRefresh = useCallback((expiresInSec) => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
@@ -211,6 +235,17 @@ export function useAuth({ API_BASE, _t, setIsRelayMode, _setSelectedChatId, _set
     }
     return () => { if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current); };
   }, [isLoggedIn, token, scheduleTokenRefresh, isNativeApp]);
+
+  // Naplánované opakování se ruší VÝHRADNĚ při odmontování. Schválně to není
+  // v efektu výš: ten se spouští znovu i při změně tokenu, a kdyby se přitom
+  // zahodil čekající pokus, vrátila by se přesně ta tichá smrt sezení, kterou
+  // tohle opravuje.
+  useEffect(() => () => {
+    if (obnovaTimerRef.current) {
+      clearTimeout(obnovaTimerRef.current);
+      obnovaTimerRef.current = null;
+    }
+  }, []);
 
   // Detect App Variant
   useEffect(() => {

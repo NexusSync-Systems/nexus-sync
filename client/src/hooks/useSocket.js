@@ -1,12 +1,30 @@
 import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
-import { setSocket as setBridgeSocket } from '../services/socketBridge';
+import {
+  setSocket as setBridgeSocket,
+  setStavSpojeni,
+  STAV_PRIPOJENO,
+} from '../services/socketBridge';
+import { pripojObnovuSpojeni } from '../services/socketObnova';
 
 import { SERVER_ORIGIN } from '../constants/config';
 const SOCKET_URL = SERVER_ORIGIN;
 
-export const useSocket = (token, onNewMessage, onMessageUpdated, onIncomingCall, onEmergencyAlert, onSipIncomingCall, onRelayCommand, onRelayEvent, onTrackerLocation, onGhostCall) => {
+/**
+ * @param {object} [options]
+ * @param {Function} [options.onAuthFailure] Zavolá se, když server odmítne
+ *   socket kvůli přihlášení — má si vyžádat nový token. Jakmile se token
+ *   změní, efekt níž postaví socket znovu.
+ */
+export const useSocket = (token, onNewMessage, onMessageUpdated, onIncomingCall, onEmergencyAlert, onSipIncomingCall, onRelayCommand, onRelayEvent, onTrackerLocation, onGhostCall, options = {}) => {
   const socketRef = useRef(null);
+  // Úklid obnovy spojení (viz services/socketObnova.js).
+  const uklidObnovyRef = useRef(null);
+  const onAuthFailureRef = useRef(options.onAuthFailure);
+
+  useEffect(() => {
+    onAuthFailureRef.current = options.onAuthFailure;
+  }, [options.onAuthFailure]);
   // Reactive socket instance so consumers (nexus.socket) re-render once it's ready
   const [socket, setSocket] = useState(null);
   const handlersRef = useRef({ onNewMessage, onMessageUpdated, onIncomingCall, onEmergencyAlert, onSipIncomingCall, onRelayCommand, onRelayEvent, onTrackerLocation, onGhostCall });
@@ -19,6 +37,10 @@ export const useSocket = (token, onNewMessage, onMessageUpdated, onIncomingCall,
   useEffect(() => {
     // If no token, don't connect or disconnect if already connected
     if (!token) {
+      if (uklidObnovyRef.current) {
+        uklidObnovyRef.current();
+        uklidObnovyRef.current = null;
+      }
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;
@@ -26,6 +48,9 @@ export const useSocket = (token, onNewMessage, onMessageUpdated, onIncomingCall,
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setSocket(null);
       }
+      // Bez tokenu se nikdo nepřipojuje a odhlášená obrazovka nemá o čem
+      // hlásit — pruh o rozpadlém spojení by na přihlašovací stránce lhal.
+      setStavSpojeni(STAV_PRIPOJENO);
       return;
     }
 
@@ -57,6 +82,13 @@ export const useSocket = (token, onNewMessage, onMessageUpdated, onIncomingCall,
           console.log(`[Socket-DEBUG] Received event: ${event}`, args);
         });
       }
+
+      // Obnova spojení a hlášení jeho stavu. Odmítnutí serverem si socket.io
+      // samo nezopakuje, proto to má vlastní modul — a vlastní testy.
+      uklidObnovyRef.current = pripojObnovuSpojeni(socketRef.current, {
+        onAuthFailure: () => onAuthFailureRef.current?.(),
+        setStav: setStavSpojeni,
+      });
 
       socketRef.current.on('connect', () => {
         if (import.meta.env.DEV) console.log('[Socket-DEBUG] Connected with ID:', socketRef.current.id);
@@ -122,15 +154,17 @@ export const useSocket = (token, onNewMessage, onMessageUpdated, onIncomingCall,
         }
       });
 
-      socketRef.current.on('disconnect', () => {});
-
-      socketRef.current.on('connect_error', (_err) => {
-        console.error('Socket connection _err:', _err);
+      socketRef.current.on('connect_error', (err) => {
+        console.error('Socket connection _err:', err);
       });
     }
 
     return () => {
       // Disconnect on unmount or token change to prevent leaks
+      if (uklidObnovyRef.current) {
+        uklidObnovyRef.current();
+        uklidObnovyRef.current = null;
+      }
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;

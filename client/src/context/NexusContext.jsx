@@ -370,6 +370,14 @@ export const NexusProvider = ({ children }) => {
   });
   const { activeOperator: authUser, token, handleLogout: logout, isLoggedIn, handleLogin } = auth;
 
+  // Když server odmítne socket kvůli přihlášení, nečekáme na naplánovanou
+  // obnovu tokenu (může být klidně o 55 minut dál) a vyžádáme si ji hned.
+  const { scheduleTokenRefresh } = auth;
+  const socketOptions = useMemo(
+    () => ({ onAuthFailure: () => scheduleTokenRefresh?.(0) }),
+    [scheduleTokenRefresh]
+  );
+
   // Redirect unauthenticated users from protected routes to login
   useEffect(() => {
     if (!isLoggedIn) {
@@ -552,7 +560,8 @@ export const NexusProvider = ({ children }) => {
       if (!activeOperatorRef.current?.isModel) return;
       setGhostCallScheduledAt(null);   // vzdálený hovor zvoní hned, žádný odpočet
       setIncomingGhostCall(true);
-    }
+    },
+    socketOptions
   );
 
   // --- Capacitor Connection Recovery ---
