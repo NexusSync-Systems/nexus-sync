@@ -30,6 +30,11 @@ const StavSpojeniPruh = ({ lang = 'cz' }) => {
         // Nad pruhem údržby: tohle je informace o tom, že UI právě nemusí
         // říkat pravdu, takže ji nemá nic překrývat.
         zIndex: 10002,
+        // NEODSTRAŇOVAT. Pruh je `position: fixed` přes celou šířku, takže bez
+        // tohohle polyká kliknutí na všechno, co je pod ním — a protože svítí
+        // právě ve chvíli, kdy se něco děje, zablokoval by i horní lištu
+        // s tlačítkem SOS. Není v něm nic, na co by se dalo klikat.
+        pointerEvents: 'none',
       }}
     >
       {hlaska.text}
