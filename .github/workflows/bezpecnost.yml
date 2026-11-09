@@ -166,9 +166,28 @@ jobs:
           # ověření. Kdyby se psalo přímo do cesty, kterou ukládá cache,
           # uložila by se i binárka z nepodařeného běhu.
           STAZ="$(mktemp -d)"
-          curl -sSfL -o "$STAZ/gitleaks.tar.gz" \
+          # Opakování NENÍ ozdoba. Obě selhání, která tuhle úlohu zavřela,
+          # byla přechodná a obě by opakování přežilo:
+          #
+          #   8. 11. 2026  curl: (56) Connection died
+          #   9. 11. 2026  curl: (22) The requested URL returned error: 504
+          #
+          # To druhé bylo PRVNÍ nasazení cache na masteru, kde cache z větve
+          # PR nelze použít, takže se stahovat muselo. Cache tedy snižuje, jak
+          # často se na síť sahá, ale první sáhnutí nezachrání — a právě to
+          # dělá tohle.
+          #
+          # `--retry-all-errors`, protože 504 je sice v základní sadě
+          # opakovatelných chyb, ale (56) ne. Cenou je, že i trvalá chyba
+          # (třeba 404 u překlepnuté verze) se zkouší celou minutu, než krok
+          # spadne. To je snesitelné: trvalá chyba znamená chybu v této
+          # úloze, a tu je potřeba si všimnout, ne ji mít rychle.
+          curl -sSfL \
+            --connect-timeout 15 \
+            --retry 6 --retry-delay 5 --retry-all-errors --retry-max-time 180 \
+            -o "$STAZ/gitleaks.tar.gz" \
             "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERZE}/gitleaks_${GITLEAKS_VERZE}_linux_x64.tar.gz" \
-            || { echo "::error::Gitleaks se nepodařilo stáhnout — kontrola tajemství NEPROBĚHLA."; exit 1; }
+            || { echo "::error::Gitleaks se nepodařilo stáhnout ani po opakování — kontrola tajemství NEPROBĚHLA."; exit 1; }
           tar -xzf "$STAZ/gitleaks.tar.gz" -C "$STAZ" gitleaks \
             || { echo "::error::Archiv gitleaks nejde rozbalit — kontrola tajemství NEPROBĚHLA."; exit 1; }
           chmod +x "$STAZ/gitleaks"
