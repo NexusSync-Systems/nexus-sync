@@ -3,7 +3,7 @@
  * Intentionally minimal: login screen → relay dashboard.
  * No Sidebar, no ViewRouter, no calendar, no inbox, no analytics.
  */
-import React, { useState, Suspense, lazy, useCallback } from 'react';
+import React, { useState, Suspense, lazy, useCallback, useMemo } from 'react';
 import { Loader2, Lock, Mail, Eye, EyeOff, Smartphone, Battery, Server, ShieldCheck, Pause, Play, Settings } from 'lucide-react';
 import { useRelay } from './context/RelayContext';
 import * as tokenStore from './services/tokenStore';
@@ -11,7 +11,8 @@ import { initPushNotifications } from './services/pushService';
 import GlobalAppStyles from './styles/GlobalAppStyles';
 import { useSipCall } from './plugins/NexusSip';
 import { useInCallService, isInCallAvailable } from './plugins/NexusInCall';
-import { useSocket } from './hooks/useSocket';
+import { useSocketBezPosluchacu } from './hooks/useSocket';
+import StavSpojeniPruh from './components/UI/StavSpojeniPruh';
 import { useSmsRelay } from './plugins/NexusSms';
 import { App as CapacitorApp } from '@capacitor/app';
 import axios from 'axios';
@@ -142,7 +143,7 @@ const RelayLoginScreen = () => {
 
 // ── Main relay dashboard (minimal) ───────────────────────────────────────────
 const RelayDashboard = () => {
-  const { operator, onLogout, lang, isNativeApp, API_BASE } = useRelay();
+  const { operator, onLogout, lang, isNativeApp, API_BASE, obnovToken } = useRelay();
   const relayProfileId = operator?.profileId || operator?.activeProfileId || null;
   const [isActive, setIsActive] = useState(true);
   const [batteryLevel, setBatteryLevel] = useState(100);
@@ -290,7 +291,14 @@ const RelayDashboard = () => {
   // prvním vykreslení. Kdyby se jen přečetl, configureRelay by ho nikdy
   // nedostal a služba na pozadí by zůstala u tokenu, co za hodinu vyprší.
   const relaySecret = tokenStore.useRelaySecret() || '';
-  const relaySocket = useSocket(relayAuthToken);
+  // Odmítnutý handshake znamená vypršelý token, ne rozbitou síť. Bez tohohle
+  // se obnova spojení z #189 opakovala navždy proti tokenu, který už nikdo
+  // nevyměnil — relay aplikace totiž obnovu tokenu neměla vůbec.
+  const nastaveniSocketu = useMemo(
+    () => ({ onAuthFailure: () => { obnovToken?.(); } }),
+    [obnovToken]
+  );
+  const relaySocket = useSocketBezPosluchacu(relayAuthToken, nastaveniSocketu);
 
   // GSM calls via InCallService — with WebRTC bridge config so an incoming GSM call
   // is streamed to the operator over WebRTC (offer/answer/ICE relayed via the server).
@@ -691,12 +699,18 @@ const RelayToasts = () => {
 
 // ── Root ─────────────────────────────────────────────────────────────────────
 const RelayApp = () => {
-  const { isLoggedIn } = useRelay();
+  const { isLoggedIn, lang } = useRelay();
 
   return (
     <>
       <GlobalAppStyles />
       <RelayToasts />
+      {/* Rozpadlé spojení musí být vidět i na telefonu. Relay sice posílá SMS
+          přes `deviceSecret` dál, ale „nejde to" a „nikdo nepíše" vypadají
+          jinak bez pruhu úplně stejně — a tenhle telefon nikdo nedrží
+          v ruce, takže tichý stav by vydržel dlouho. Na přihlašovací
+          obrazovce se nezobrazuje, tam žádný socket neběží. */}
+      {isLoggedIn && <StavSpojeniPruh lang={lang} />}
       {isLoggedIn ? <RelayDashboard /> : <RelayLoginScreen />}
     </>
   );
