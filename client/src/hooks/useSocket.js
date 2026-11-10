@@ -176,3 +176,21 @@ export const useSocket = (token, onNewMessage, onMessageUpdated, onIncomingCall,
 
   return socket;
 };
+
+
+/**
+ * Totéž, ale pro aplikaci, která žádný z posluchačů nepotřebuje — relay chce
+ * jen socket samotný a nastavení, které je v pozičním seznamu jedenácté.
+ *
+ * Proč to není napsané na místě volání: devět `undefined` v řadě je řádek,
+ * kde se překlep nepozná, a jeden chybějící by nastavení poslal jako
+ * posluchače. Tady, hned pod signaturou, se to dá zkontrolovat očima —
+ * a `useSocket.length` to navíc hlídá testem.
+ */
+export const useSocketBezPosluchacu = (token, options) =>
+  useSocket(
+    token,
+    undefined, undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined,
+    options
+  );
