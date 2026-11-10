@@ -9,8 +9,11 @@ import {
   MIN_PRODLEVA_PO_OBNOVE_MS,
 } from './obnovaTokenu';
 
+// `btoa`, ne `Buffer`: testovací prostředí je sice `node`, ale lint tu hlídá
+// prohlížečové globály (modul sám používá `atob`), takže `Buffer` je tady
+// nedefinovaný identifikátor. Payloady jsou ASCII, na což `btoa` stačí.
 const token = (payload) =>
-  ['hlavicka', Buffer.from(JSON.stringify(payload)).toString('base64'), 'podpis'].join('.');
+  ['hlavicka', btoa(JSON.stringify(payload)), 'podpis'].join('.');
 
 describe('prodleva před vypršením', () => {
   it('obnovuje s předstihem', () => {
