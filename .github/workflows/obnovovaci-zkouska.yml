@@ -1,0 +1,81 @@
+name: Obnovovací zkouška zálohy
+
+# Jediná kontrola, která zálohu opravdu OBNOVÍ.
+#
+# Co už hlídá `Hlídka serveru` (každé dvě hodiny): že záloha vzniká, není
+# starší než 36 h, má šifrovanou kopii a že záloha konfigurace odpovídá
+# živému `.env`. Co se ověřuje při vzniku zálohy: velikost, čitelnost
+# archivu (`pg_restore --list`) a zkušební rozšifrování.
+#
+# Nic z toho ale neodpovídá na otázku, kvůli které zálohy existují: VZNIKNE
+# Z TOHO FUNKČNÍ DATABÁZE? Uříznutý dump se dá přečíst i zašifrovat a jeho
+# kontrolní součet sedí — a pg_restore na něm přesto spadne. Vyzkoušeno,
+# viz `Obnovovací zkouška (negativní)` v ci.yml.
+#
+# POZOR, TOHLE ZAPISUJE, na rozdíl od hlídky: zakládá a maže dočasnou
+# databázi na produkčním stroji. Proto běží měsíčně, ne stále, a proto má
+# skript dvě pojistky na jméno cílové databáze a uklízí i při pádu.
+#
+# Měsíčně schválně: obnovení je jediná kontrola, která stroj na chvíli
+# zatíží a zdvojí data na disku. Denně by to byla cena bez odpovídajícího
+# přínosu — záloha, která se obnovila prvního, se druhého nerozbije sama.
+#
+# Nezakládá issue (repozitář je veřejný) — spadlý naplánovaný běh pošle
+# GitHub mailem vlastníkovi. Výpisy jsou úsporné: verdikty a čísla.
+
+on:
+  schedule:
+    # Prvního v měsíci ve 4:23 UTC — po noční záloze ve 3:17 a po záloze
+    # konfigurace ve 3:41, aby se zkoušelo to nejčerstvější.
+    - cron: '23 4 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: obnovovaci-zkouska
+  cancel-in-progress: false
+
+jobs:
+  zkouska:
+    name: Obnovení zálohy na serveru
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Obnovit nejnovější zálohu do dočasné databáze
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "${DEPLOY_SSH_KEY:-}" ] || [ -z "${DEPLOY_HOST:-}" ]; then
+            echo "::error::Chybí DEPLOY_SSH_KEY nebo DEPLOY_HOST — na stroj se nedostanu."
+            exit 1
+          fi
+
+          KLIC="$RUNNER_TEMP/zkouska_key"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$KLIC"
+          chmod 600 "$KLIC"
+
+          # Skript leží v nasazeném `server/`, takže se aktualizuje s každým
+          # nasazením — stejně jako `udrzuj-instanci.sh`. Nekopíruje se sem
+          # z repozitáře schválně: co se spustí na produkci, má být to, co
+          # na produkci doopravdy leží.
+          SKRIPT=/root/nexus-backend/scripts/obnovovaci-zkouska.sh
+
+          ssh -i "$KLIC" \
+              -o StrictHostKeyChecking=accept-new \
+              -o ConnectTimeout=25 -o BatchMode=yes \
+              "$DEPLOY_USER@$DEPLOY_HOST" \
+              "sudo test -f $SKRIPT && sudo bash $SKRIPT"
+          VYSLEDEK=$?
+
+          rm -f "$KLIC"
+
+          if [ "$VYSLEDEK" -ne 0 ]; then
+            echo "::error::Obnovovací zkouška selhala. Záloha NENÍ prokazatelně obnovitelná."
+          fi
+          exit $VYSLEDEK
