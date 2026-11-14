@@ -197,7 +197,17 @@ jobs:
 
   e2e-tests:
     name: Playwright E2E Tests
-    runs-on: ubuntu-latest
+    # PŘIPÍCHNUTO NA 24.04, a ne proto, že by se nám tak chtělo.
+    # `ubuntu-latest` se 14. 11. 2026 překlopilo na 26.04 a Playwright 1.60
+    # na něm odmítne nastartovat:
+    #
+    #   Error: ERROR: Playwright does not support chromium on ubuntu26.04-x64
+    #
+    # Spadlo to na každém PR a s kódem to nemělo nic společného. Tohle je
+    # dočasná náplast, ne řešení: správně je zvednout Playwright na verzi,
+    # která 26.04 umí, a připíchnutí pak zrušit. Do té doby ať brána měří
+    # testy, ne obrázek runneru.
+    runs-on: ubuntu-24.04
     # Běh trvá běžně 8–11 minut. Bez tohohle limitu platí výchozích šest hodin
     # a úloha, která se na něčem zasekne, drží runner celé odpoledne, místo
     # aby řekla, že něco není v pořádku. (Stalo se to 4. 8. 2026, kdy testy
@@ -474,7 +484,8 @@ jobs:
   # sdílet bez composite action. Když se bude měnit tam, musí se i tady.
   mereni-testu:
     name: Měření testů mimo bránu
-    runs-on: ubuntu-latest
+    # Viz poznámka u `e2e-tests`: Playwright 1.60 na 26.04 nenastartuje.
+    runs-on: ubuntu-24.04
     if: github.ref == 'refs/heads/master' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.plne_mereni)
     timeout-minutes: 90
 
@@ -1420,6 +1431,152 @@ jobs:
           firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_NEXUS_SYNC_8D50B }}'
           channelId: live
           projectId: nexus-sync-8d50b
+
+  # ── Obnovovací zkouška nasucho ────────────────────────────────────────────────
+  #
+  # `server/scripts/obnovovaci-zkouska.sh` obnovuje na produkci zálohu do dočasné
+  # databáze; měsíčně ji tam pouští workflow „Obnovovací zkouška zálohy". To je
+  # místo, kde se chyba ve skriptu pozná pozdě a draho, takže se tady zkouší
+  # nasucho: postaví se databáze, zazálohuje se tak, jak to dělá server,
+  # zašifruje — a skript se pustí dvakrát.
+  #
+  # Negativní případ je ten důležitý. UŘÍZLÝ dump se dá rozšifrovat a jeho
+  # kontrolní součet SEDÍ, takže všechny ostatní kontroly ho prohlásí za
+  # zdravý; odhalí ho až skutečné obnovení. Kdyby ten krok prošel, znamenalo by
+  # to, že zkouška nepozná nepoužitelnou zálohu — a to je horší než ji nemít.
+  obnovovaci-zkouska-nasucho:
+    name: Obnovovací zkouška (nasucho)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    services:
+      postgres:
+        # Verze NESMÍ být nižší než `pg_dump` na runneru. Novější klient píše
+        # do dumpu `SET transaction_timeout`, které starší server nezná,
+        # a obnovení pak padá na
+        #   ERROR: unrecognized configuration parameter "transaction_timeout"
+        # Vypadá to jako vadná záloha, ale je to jen rozdíl verzí — na serveru,
+        # kde klient i server jsou jedna instalace, nastat nemůže. Krok
+        # „Verze klienta a serveru" níž to pojmenuje, než se to projeví
+        # tímhle způsobem.
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nexus_zaloha_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+
+    # Heslo zvlášť a URL se skládá až za běhu — stejně jako u schema driftu,
+    # aby zapsaný connection string nespouštěl kontrolu tajemství.
+    env:
+      PGPASSWORD_CI: postgres
+      BACKUP_DIR: /tmp/zalohy
+      HESLO: /tmp/zaloha-heslo.txt
+      DOCASNA_DB: nexus_obnova_zkouska_ci
+      MIN_VOLNO_MB: '10'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Nástroje PostgreSQL
+        run: sudo apt-get update -qq && sudo apt-get install -y postgresql-client
+
+      - name: Verze klienta a serveru
+        run: |
+          set -euo pipefail
+          URL="postgresql://postgres:${PGPASSWORD_CI}@localhost:5432/nexus_zaloha_test"
+          KLIENT=$(pg_dump --version | grep -oE '[0-9]+' | head -1)
+          SERVER=$(psql "$URL" -t -A -c 'SHOW server_version;' | grep -oE '^[0-9]+')
+          echo "pg_dump: $KLIENT, server: $SERVER"
+          if [ "$KLIENT" -gt "$SERVER" ]; then
+            echo "::error::pg_dump ($KLIENT) je novější než server ($SERVER). Dump by nesl novější syntaxi a obnovení by spadlo na rozdílu verzí, ne na vadné záloze. Zvednout image postgres u teto ulohy."
+            exit 1
+          fi
+
+      - name: Vyrobit zálohu tak, jak ji dělá server
+        run: |
+          set -euo pipefail
+          URL="postgresql://postgres:${PGPASSWORD_CI}@localhost:5432/nexus_zaloha_test"
+          echo "DATABASE_URL=$URL" >> "$GITHUB_ENV"
+
+          # Jedenáct tabulek schválně: skript žádá aspoň deset, aby prázdné
+          # schéma neprošlo jako „obnovená databáze".
+          psql "$URL" -v ON_ERROR_STOP=1 -q <<'SQL'
+          CREATE TABLE "Agency"(id serial primary key, name text);
+          CREATE TABLE "User"(id serial primary key, email text);
+          CREATE TABLE "Profile"(id serial primary key, name text);
+          CREATE TABLE "Chat"(id serial primary key, t text);
+          CREATE TABLE "Message"(id serial primary key, body text);
+          CREATE TABLE "Subscription"(id serial primary key, plan text);
+          CREATE TABLE "DeviceBinding"(id serial primary key, dev text);
+          CREATE TABLE "Vypln1"(id int);
+          CREATE TABLE "Vypln2"(id int);
+          CREATE TABLE "Vypln3"(id int);
+          CREATE TABLE "Vypln4"(id int);
+          INSERT INTO "Agency"(name) VALUES ('Zkouska');
+          INSERT INTO "User"(email) VALUES ('a@x.cz'),('b@x.cz');
+          INSERT INTO "Profile"(name) VALUES ('A'),('B'),('C');
+          INSERT INTO "Chat"(t) VALUES ('c1'),('c2');
+          INSERT INTO "Message"(body) VALUES ('m1'),('m2'),('m3');
+          INSERT INTO "Subscription"(plan) VALUES ('free');
+          INSERT INTO "DeviceBinding"(dev) VALUES ('relay'),('full');
+          SQL
+
+          mkdir -p "$BACKUP_DIR"
+          DUMP="$BACKUP_DIR/nexus_$(date -u +%Y%m%dT%H%M%SZ).dump"
+          pg_dump "$URL" --format=custom --no-owner --no-acl --file="$DUMP"
+          sha256sum "$DUMP" > "$DUMP.sha256"
+
+          openssl rand -base64 48 | head -n 1 > "$HESLO"
+          chmod 600 "$HESLO"
+          gpg --batch --yes --quiet --pinentry-mode loopback \
+              --passphrase-file "$HESLO" \
+              --symmetric --cipher-algo AES256 \
+              --output "$DUMP.gpg" "$DUMP"
+          echo "$(sha256sum "$DUMP" | cut -d' ' -f1)  $(basename "$DUMP")" > "$DUMP.gpg.sha256-obsahu"
+          echo "DUMP=$DUMP" >> "$GITHUB_ENV"
+          echo "Vyrobeno: $(ls "$BACKUP_DIR")"
+
+      - name: Zdravá záloha se musí obnovit
+        run: bash server/scripts/obnovovaci-zkouska.sh
+
+      - name: Uříznutá záloha NESMÍ projít
+        run: |
+          set -uo pipefail
+          # Uříznutý dump se zašifruje znovu a součet se přepočítá, takže
+          # rozšifrování i kontrola součtu projdou. Spadnout má až obnovení.
+          head -c 1200 "$DUMP" > /tmp/urizly.dump
+          gpg --batch --yes --quiet --pinentry-mode loopback \
+              --passphrase-file "$HESLO" \
+              --symmetric --cipher-algo AES256 \
+              --output "$DUMP.gpg" /tmp/urizly.dump
+          echo "$(sha256sum /tmp/urizly.dump | cut -d' ' -f1)  urizly.dump" > "$DUMP.gpg.sha256-obsahu"
+
+          VYSTUP=$(bash server/scripts/obnovovaci-zkouska.sh 2>&1) && KOD=0 || KOD=$?
+          echo "$VYSTUP" | tail -20
+
+          if [ "$KOD" -eq 0 ]; then
+            echo "::error::Zkouška prohlásila uříznutou zálohu za obnovitelnou. Tím by ztratila smysl."
+            exit 1
+          fi
+          echo "$VYSTUP" | grep -q 'obnovení SELHALO' || {
+            echo "::error::Zkouška spadla, ale na jiném místě než na obnovení — ověřit, co se změnilo."
+            exit 1
+          }
+          echo "✓ uříznutá záloha správně neprošla (kód $KOD)"
+
+      - name: Po zkoušce nesmí zůstat dočasná databáze
+        run: |
+          set -euo pipefail
+          SPRAVCE="postgresql://postgres:${PGPASSWORD_CI}@localhost:5432/postgres"
+          POCET=$(psql "$SPRAVCE" -t -A -c "SELECT count(*) FROM pg_database WHERE datname = '$DOCASNA_DB';")
+          echo "dočasných databází se jménem $DOCASNA_DB: $POCET"
+          [ "$POCET" = "0" ] || {
+            echo "::error::Na stroji zůstala dočasná databáze s kopií dat."
+            exit 1
+          }
 
   # ── Backup / restore readiness audit ──────────────────────────────────────────
   backup-restore-audit:
