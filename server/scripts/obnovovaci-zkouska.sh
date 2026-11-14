@@ -55,11 +55,65 @@ if [ -z "${DATABASE_URL:-}" ]; then
   exit 1
 fi
 
-# Adresa, pod kterou se zakládá a maže dočasná databáze. Na `postgres` se
-# připojit musíme, protože do databáze, kterou právě zakládáme, to nejde.
-if [ -z "${SPRAVCE_URL:-}" ]; then
+# Kdo zakládá a maže dočasnou databázi.
+#
+# Aplikační uživatel to NENÍ a nemá být. `docs/novy-server-runbook.md` zakládá
+# databázi i roli takto:
+#
+#   apt install -y postgresql postgresql-client
+#   sudo -u postgres createdb nexus
+#   sudo -u postgres psql -c "CREATE USER nexus WITH PASSWORD '...'"
+#
+# Role `nexus` tedy právo CREATEDB nemá, a první produkční běh téhle zkoušky
+# (14. 11. 2026) na tom spadl: `ERROR: permission denied to create database`.
+# Správná odpověď NENÍ to právo aplikaci přidat — běžící aplikace zakládat
+# databáze nepotřebuje a rozšiřovat jí práva kvůli měsíční kontrole je
+# obchod špatným směrem. Zakládá se proto jako správce přes `sudo -u postgres`,
+# přesně jak to dělá runbook.
+#
+# `SPRAVCE_URL` z prostředí má přednost: na instalaci, kde databáze neleží na
+# tomtéž stroji, je `sudo -u postgres` k ničemu a adresu je potřeba předat.
+if [ -n "${SPRAVCE_URL:-}" ]; then
+  SPRAVCE_MOD=url
+elif sudo -u postgres psql -q -c 'SELECT 1;' >/dev/null 2>&1; then
+  SPRAVCE_MOD=peer
+else
+  # Poslední možnost: aplikační uživatel přes `postgres`. Na serveru podle
+  # runbooku to neprojde, ale na jiné instalaci (vlastní superuživatel
+  # v DATABASE_URL) ano, a krok 4 chybu vypíše srozumitelně.
+  SPRAVCE_MOD=url
   SPRAVCE_URL="$(printf '%s' "$DATABASE_URL" | sed -E 's#(/)[^/?]+(\?|$)#\1postgres\2#')"
 fi
+
+spravce_zaloz() {
+  if [ "$SPRAVCE_MOD" = peer ]; then
+    # `-O` dá vlastnictví aplikačnímu uživateli, aby do ní mohl obnovovat.
+    # Bez toho vlastní databázi `postgres` a od PostgreSQL 15 nemá nikdo
+    # jiný právo psát do schématu `public` — obnovení by spadlo na právech,
+    # což vypadá jako vadná záloha.
+    sudo -u postgres createdb -O "$UZIVATEL" "$DOCASNA_DB" 2>&1
+  else
+    psql "$SPRAVCE_URL" -q -c "CREATE DATABASE \"$DOCASNA_DB\";" 2>&1
+  fi
+}
+
+spravce_smaz() {
+  if [ "$SPRAVCE_MOD" = peer ]; then
+    sudo -u postgres dropdb --if-exists "$DOCASNA_DB" >/dev/null 2>&1
+  else
+    psql "$SPRAVCE_URL" -q -c "DROP DATABASE IF EXISTS \"$DOCASNA_DB\";" >/dev/null 2>&1
+  fi
+}
+
+spravce_ukonci_spojeni() {
+  if [ "$SPRAVCE_MOD" = peer ]; then
+    sudo -u postgres psql -q -c \
+      "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DOCASNA_DB';" >/dev/null 2>&1
+  else
+    psql "$SPRAVCE_URL" -q -v ON_ERROR_STOP=0 \
+      -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DOCASNA_DB';" >/dev/null 2>&1
+  fi
+}
 
 # ── Pojistka: nikdy nesahat na produkční databázi ────────────────────────────
 # verify-restore-postgres.sh porovnává celé URL. To nestačí: stejná databáze
@@ -67,6 +121,11 @@ fi
 # `127.0.0.1`). Proto se porovnává i JMÉNO databáze, a to je ta hodnota,
 # kterou pg_restore opravdu použije.
 PROD_DB="$(printf '%s' "$DATABASE_URL" | sed -E 's#^.*/([^/?]+)(\?.*)?$#\1#')"
+
+# Logy veřejného repozitáře vidí kdokoli, takže do výpisu nesmí jít adresa
+# s heslem. Tohle z ní nechá jen to, co je pro diagnostiku potřeba.
+bez_hesla() { printf '%s' "$1" | sed -E 's#(//[^:/@]+):[^@]*@#\1:***@#'; }
+UZIVATEL="$(printf '%s' "$DATABASE_URL" | sed -E 's#^[^/]*//([^:/@]+).*#\1#')"
 if [ "$DOCASNA_DB" = "$PROD_DB" ]; then
   echo "::error::Dočasná databáze se jmenuje stejně jako produkční ($PROD_DB). Odmítám pokračovat." >&2
   exit 1
@@ -82,10 +141,8 @@ uklid() {
   # na serveru zůstane ležet, je horší než neprovedená zkouška.
   [ -n "$PRACOVNI" ] && rm -rf "$PRACOVNI"
   if [ -n "${DB_ZALOZENA:-}" ]; then
-    psql "$SPRAVCE_URL" -q -v ON_ERROR_STOP=0 \
-      -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DOCASNA_DB';" \
-      >/dev/null 2>&1
-    if psql "$SPRAVCE_URL" -q -c "DROP DATABASE IF EXISTS \"$DOCASNA_DB\";" >/dev/null 2>&1; then
+    spravce_ukonci_spojeni
+    if spravce_smaz; then
       echo "✓ dočasná databáze smazána"
     else
       echo "::error::DOČASNOU DATABÁZI $DOCASNA_DB NEŠLO SMAZAT — leží na serveru s kopií dat." >&2
@@ -137,13 +194,37 @@ if [ "$VOLNO_MB" -lt "$MIN_VOLNO_MB" ]; then
 fi
 
 krok "4. Obnovení do dočasné databáze $DOCASNA_DB"
-psql "$SPRAVCE_URL" -q -c "DROP DATABASE IF EXISTS \"$DOCASNA_DB\";" >/dev/null 2>&1
-if ! psql "$SPRAVCE_URL" -q -c "CREATE DATABASE \"$DOCASNA_DB\";" >/dev/null 2>&1; then
+if [ "$SPRAVCE_MOD" = peer ]; then
+  echo "zakládá správce databáze lokálně (sudo -u postgres), vlastníkem bude $UZIVATEL"
+else
+  echo "zakládá se přes $(bez_hesla "$SPRAVCE_URL") (uživatel $UZIVATEL)"
+fi
+
+# Chyba psql se NEZAHAZUJE. První produkční běh 14. 11. 2026 spadl na
+# „dočasnou databázi nelze založit" a důvod nikde nebyl, protože tenhle
+# výstup mířil do /dev/null. Hláška bez příčiny je u kontroly, která běží
+# raz za měsíc, skoro stejně nepoužitelná jako žádná.
+spravce_smaz
+CHYBA_PSQL="$PRACOVNI/psql.log"
+if ! spravce_zaloz > "$CHYBA_PSQL" 2>&1; then
   chyba "dočasnou databázi nelze založit"
+  echo "--- co na to psql ---" >&2
+  sed -E 's#(//[^:/@]+):[^@]*@#\1:***@#g' "$CHYBA_PSQL" >&2
+
+  # Dvě příčiny, které se v tomhle bodě dají čekat, a každá má jinou opravu.
+  # Vypsat je sem je levnější než je příští měsíc dohledávat znovu.
+  if grep -qi 'permission denied to create database' "$CHYBA_PSQL"; then
+    echo "::error::Uživatel $UZIVATEL nemá právo CREATEDB. Zkoušku je potřeba pustit jako správce databáze (na lokální instalaci přes 'sudo -u postgres'), ne rozšiřovat práva aplikačního uživatele." >&2
+  elif grep -qiE 'database "postgres" does not exist|role .* does not exist|authentication failed' "$CHYBA_PSQL"; then
+    echo "::error::Správcovské spojení $(bez_hesla "$SPRAVCE_URL") nefunguje — adresa odvozená z DATABASE_URL tady neplatí. Předat ji ručně přes SPRAVCE_URL." >&2
+  fi
   exit 1
 fi
 DB_ZALOZENA=1
-OBNOVA_URL="$(printf '%s' "$SPRAVCE_URL" | sed -E "s#(/)postgres(\?|$)#\1$DOCASNA_DB\2#")"
+# Obnovuje se a čte se jako APLIKAČNÍ uživatel, ne jako správce. Jednak to
+# tak dělá i runbook, jednak se tím mimochodem ověří, že obnovená databáze
+# je použitelná pro toho, kdo s ní bude pracovat — ne jen pro superuživatele.
+OBNOVA_URL="$(printf '%s' "$DATABASE_URL" | sed -E "s#(/)[^/?]+(\?|$)#\1$DOCASNA_DB\2#")"
 
 # `--exit-on-error` schválně: bez něj pg_restore chyby vypíše, ale skončí
 # nulou, takže by zkouška hlásila úspěch nad polovinou databáze.

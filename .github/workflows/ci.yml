@@ -1500,6 +1500,12 @@ jobs:
           set -euo pipefail
           URL="postgresql://postgres:${PGPASSWORD_CI}@localhost:5432/nexus_zaloha_test"
           echo "DATABASE_URL=$URL" >> "$GITHUB_ENV"
+          # SPRAVCE_URL se předává SCHVÁLNĚ, i když by si ji skript odvodil sám.
+          # Jinak by zkusil `sudo -u postgres` — a na runneru GitHubu Postgres
+          # nainstalovaný JE. Kdyby na něm zrovna běžel, databáze by vznikla
+          # v něm, zatímco obnovení míří do služby, a padlo by to na
+          # „database does not exist". Tady chceme jednoznačnost, ne hádání.
+          echo "SPRAVCE_URL=postgresql://postgres:${PGPASSWORD_CI}@localhost:5432/postgres" >> "$GITHUB_ENV"
 
           # Jedenáct tabulek schválně: skript žádá aspoň deset, aby prázdné
           # schéma neprošlo jako „obnovená databáze".
