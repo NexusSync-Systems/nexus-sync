@@ -81,7 +81,12 @@ Production/live:
 
 ## 5. Relay Android gate
 
-Podle `docs/android-relay-field-test.md` musi projit:
+**Postup krok za krokem je v `docs/zivy-test-dvou-telefonu.md`** — vcetne toho,
+jak si po kazdem kroku overit, co doopravdy lezi v databazi (workflow
+`Kontrola relay telefonu`, jen pro cteni). Podrobne testy a logcat jsou
+v `docs/android-relay-field-test.md`.
+
+Musi projit:
 
 - `/api/device/verify` sparuje telefon se spravnym profilem.
 - Nexus Relay je vychozi SMS aplikace.

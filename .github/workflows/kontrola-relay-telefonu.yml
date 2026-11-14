@@ -1,0 +1,99 @@
+name: Kontrola relay telefonu
+
+# Pomocník pro živý test dvou telefonů (brána 5 v docs/pilot-readiness-checklist.md).
+#
+# Člověk posílá SMS z druhého telefonu a dívá se do webu. Tohle odpovídá na
+# tu část, kterou z webu poznat nejde: co přesně leží v databázi — komu se
+# telefon připsal, kolik SMS se uložilo, jestli nejsou dvakrát a jestli
+# odchozí zprávy neuvízly v `pending_relay`.
+#
+# JEN PRO ČTENÍ. Na rozdíl od obnovovací zkoušky tenhle běh na serveru nic
+# nemění; spojení se navíc otevírá s `default_transaction_read_only=on`, takže
+# zápis odmítne sama databáze. Proto se smí pouštět kdykoli a opakovaně.
+#
+# Běží jen na vyžádání, protože má smysl pouze ve chvíli, kdy někdo
+# s telefonem v ruce posílá zprávy. V plánu schválně není.
+#
+# VÝSTUP JE VEŘEJNÝ (repozitář je veřejný), proto skript vypisuje jen počty,
+# stáří v sekundách a verdikty — žádná čísla, texty zpráv, e-maily ani
+# installationId. Konkrétní zprávu si prohlédněte v dashboardu.
+
+on:
+  workflow_dispatch:
+    inputs:
+      profil:
+        description: 'Jméno profilu v databázi (Profile.name)'
+        required: false
+        default: 'Testovaci profil A'
+      okno_min:
+        description: 'Kolik minut dozadu se mají SMS počítat'
+        required: false
+        default: '30'
+      cekano_sms:
+        description: 'Kolik příchozích SMS se čeká (0 = jen vypsat, nehodnotit)'
+        required: false
+        default: '0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kontrola-relay-telefonu
+  cancel-in-progress: false
+
+jobs:
+  kontrola:
+    name: Co leží v databázi
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Přečíst stav relay telefonu
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          PROFIL: ${{ inputs.profil }}
+          OKNO_MIN: ${{ inputs.okno_min }}
+          CEKANO_SMS: ${{ inputs.cekano_sms }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "${DEPLOY_SSH_KEY:-}" ] || [ -z "${DEPLOY_HOST:-}" ]; then
+            echo "::error::Chybí DEPLOY_SSH_KEY nebo DEPLOY_HOST — na stroj se nedostanu."
+            exit 1
+          fi
+
+          # Vstupy jdou od člověka a dosazují se do příkazu pro vzdálený
+          # shell. Čísla se proto ověřují jako čísla a jméno profilu se
+          # předává přes `printf %q`, ne vložením do uvozovek.
+          case "${OKNO_MIN:-}" in ''|*[!0-9]*)
+            echo "::error::okno_min musí být číslo v minutách."; exit 1 ;; esac
+          case "${CEKANO_SMS:-}" in ''|*[!0-9]*)
+            echo "::error::cekano_sms musí být číslo (0 = nehodnotit)."; exit 1 ;; esac
+
+          KLIC="$RUNNER_TEMP/kontrola_relay_key"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$KLIC"
+          chmod 600 "$KLIC"
+
+          # Skript leží v nasazeném `server/`, takže se aktualizuje s každým
+          # nasazením — stejný důvod jako u obnovovací zkoušky: co se spustí
+          # na produkci, má být to, co na produkci doopravdy leží.
+          SKRIPT=/root/nexus-backend/scripts/kontrola-relay-telefonu.sh
+
+          # `sudo env VAR=…` schválně, ne `sudo VAR=… bash`: přiřazení před
+          # příkazem závisí na nastavení sudoers na tom konkrétním stroji,
+          # kdežto `env` je jen program a chová se všude stejně.
+          PRIKAZ="sudo test -f $SKRIPT && sudo env PROFIL=$(printf '%q' "${PROFIL:-Testovaci profil A}") OKNO_MIN=$OKNO_MIN CEKANO_SMS=$CEKANO_SMS bash $SKRIPT"
+
+          ssh -i "$KLIC" \
+              -o StrictHostKeyChecking=accept-new \
+              -o ConnectTimeout=25 -o BatchMode=yes \
+              "$DEPLOY_USER@$DEPLOY_HOST" "$PRIKAZ"
+          VYSLEDEK=$?
+
+          rm -f "$KLIC"
+
+          if [ "$VYSLEDEK" -ne 0 ]; then
+            echo "::error::Stav relay telefonu neodpovídá tomu, co brána 5 požaduje."
+          fi
+          exit $VYSLEDEK
