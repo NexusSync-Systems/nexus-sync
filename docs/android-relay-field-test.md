@@ -53,18 +53,33 @@ Pri testu sbirejte Android logcat:
 adb logcat -v time NexusRelay:D NexusRelayService:D FirebaseMessaging:D AndroidRuntime:E '*:S'
 ```
 
-Pro overeni nainstalovane verze:
+### Pozor na balicek: relay NENI `com.nexushub.app`
+
+Na relay telefonu je `com.nexushub.relay` („Nexus Relay"). `com.nexushub.app`
+(„Nexus Hub") je plna aplikace pro lidi — viz `docs/relay-hovory-a-sms.md`.
+Prikazy nize mely do 14. 11. 2026 napsany `com.nexushub.app`, takze na relay
+telefonu vracely prazdny vystup a vypadalo to, jako ze opravneni chybi.
+Overte si, co na telefonu doopravdy je:
 
 ```bash
-adb shell dumpsys package com.nexushub.app | grep -E 'versionName|versionCode'
+adb shell pm list packages | grep nexushub
 ```
 
-Pro overeni, ze Android skutecne drzi Nexus Relay jako vychozi SMS aplikaci:
+Pro overeni nainstalovane verze (cislo porovnejte s `GET /api/vultr/apk-info`):
+
+```bash
+adb shell dumpsys package com.nexushub.relay | grep -E 'versionName|versionCode'
+```
+
+Pro overeni, ze Android skutecne drzi Nexus Relay jako vychozi SMS aplikaci.
+Prvni prikaz musi vypsat `com.nexushub.relay`; kdyz vypise systemovou SMS
+aplikaci nebo `com.nexushub.app`, relay SMS nedostane a zadny dalsi test
+nema smysl:
 
 ```bash
 adb shell cmd role holders android.app.role.SMS
-adb shell dumpsys package com.nexushub.app | grep -E 'READ_SMS|RECEIVE_SMS|SEND_SMS|WRITE_SMS'
-adb shell appops get com.nexushub.app READ_SMS
+adb shell dumpsys package com.nexushub.relay | grep -E 'READ_SMS|RECEIVE_SMS|SEND_SMS|WRITE_SMS'
+adb shell appops get com.nexushub.relay READ_SMS
 ```
 
 Pro rychlou kontrolu, zda SMS lezi v systemovem SMS provideru telefonu:
