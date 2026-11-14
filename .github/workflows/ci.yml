@@ -197,7 +197,17 @@ jobs:
 
   e2e-tests:
     name: Playwright E2E Tests
-    runs-on: ubuntu-latest
+    # PŘIPÍCHNUTO NA 24.04, a ne proto, že by se nám tak chtělo.
+    # `ubuntu-latest` se 14. 11. 2026 překlopilo na 26.04 a Playwright 1.60
+    # na něm odmítne nastartovat:
+    #
+    #   Error: ERROR: Playwright does not support chromium on ubuntu26.04-x64
+    #
+    # Spadlo to na každém PR a s kódem to nemělo nic společného. Tohle je
+    # dočasná náplast, ne řešení: správně je zvednout Playwright na verzi,
+    # která 26.04 umí, a připíchnutí pak zrušit. Do té doby ať brána měří
+    # testy, ne obrázek runneru.
+    runs-on: ubuntu-24.04
     # Běh trvá běžně 8–11 minut. Bez tohohle limitu platí výchozích šest hodin
     # a úloha, která se na něčem zasekne, drží runner celé odpoledne, místo
     # aby řekla, že něco není v pořádku. (Stalo se to 4. 8. 2026, kdy testy
@@ -474,7 +484,8 @@ jobs:
   # sdílet bez composite action. Když se bude měnit tam, musí se i tady.
   mereni-testu:
     name: Měření testů mimo bránu
-    runs-on: ubuntu-latest
+    # Viz poznámka u `e2e-tests`: Playwright 1.60 na 26.04 nenastartuje.
+    runs-on: ubuntu-24.04
     if: github.ref == 'refs/heads/master' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.plne_mereni)
     timeout-minutes: 90
 
@@ -1440,7 +1451,15 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-alpine
+        # Verze NESMÍ být nižší než `pg_dump` na runneru. Novější klient píše
+        # do dumpu `SET transaction_timeout`, které starší server nezná,
+        # a obnovení pak padá na
+        #   ERROR: unrecognized configuration parameter "transaction_timeout"
+        # Vypadá to jako vadná záloha, ale je to jen rozdíl verzí — na serveru,
+        # kde klient i server jsou jedna instalace, nastat nemůže. Krok
+        # „Verze klienta a serveru" níž to pojmenuje, než se to projeví
+        # tímhle způsobem.
+        image: postgres:18-alpine
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: nexus_zaloha_test
@@ -1463,6 +1482,18 @@ jobs:
 
       - name: Nástroje PostgreSQL
         run: sudo apt-get update -qq && sudo apt-get install -y postgresql-client
+
+      - name: Verze klienta a serveru
+        run: |
+          set -euo pipefail
+          URL="postgresql://postgres:${PGPASSWORD_CI}@localhost:5432/nexus_zaloha_test"
+          KLIENT=$(pg_dump --version | grep -oE '[0-9]+' | head -1)
+          SERVER=$(psql "$URL" -t -A -c 'SHOW server_version;' | grep -oE '^[0-9]+')
+          echo "pg_dump: $KLIENT, server: $SERVER"
+          if [ "$KLIENT" -gt "$SERVER" ]; then
+            echo "::error::pg_dump ($KLIENT) je novější než server ($SERVER). Dump by nesl novější syntaxi a obnovení by spadlo na rozdílu verzí, ne na vadné záloze. Zvednout image postgres u teto ulohy."
+            exit 1
+          fi
 
       - name: Vyrobit zálohu tak, jak ji dělá server
         run: |
