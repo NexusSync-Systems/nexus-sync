@@ -104,10 +104,15 @@ Workflowy v repozitari pouzivaji tyto secrets:
 - `FIREBASE_SERVICE_ACCOUNT_NEXUS_SYNC_8D50B`
 - `GCP_SA_KEY`
 - `NEXUS_API_URL`
-- `NEXUS_DEVICE_SECRET`
-- `TEST_OWNER_EMAIL`
-- `TEST_OWNER_PASSWORD`
 - `FRONTEND_URL`
+
+Pozor na tri, ktere tu byly do 15. 11. 2026 a uz je zadny workflow nepouziva:
+`NEXUS_DEVICE_SECRET`, `TEST_OWNER_EMAIL` a `TEST_OWNER_PASSWORD`. Spotrebovavala
+je jen uloha `relay-field-test`, ktera je odstranena -- zaznam proc je
+v `.github/workflows/ci.yml` na jejim miste. Nezakladejte je: repozitar je
+verejny a dve z nich jsou hesla, ktera by v CI nemela co delat. Testy nad
+`/api/device/relay` si v brane vystaci s vlastni docasnou databazi a pevnou
+testovaci hodnotou.
 
 Poznamka: backend deploy guard odmita nasazeni, pokud je v GitHub Actions nastaveny
 `STRIPE_SECRET_KEY`, ale chybi `STRIPE_WEBHOOK_SECRET` nebo `STRIPE_PUBLISHABLE_KEY`.

@@ -2089,122 +2089,41 @@ jobs:
           fi
           echo "✓ prázdná ani chybějící konfigurace neprojde"
 
-  # ── Android Relay field test (post-deploy liveness check) ─────────────────────
-  relay-field-test:
-    name: Android Relay Field Test
-    runs-on: ubuntu-latest
-    needs: [deploy-backend]
-    if: >
-      github.ref == 'refs/heads/master' &&
-      github.event_name == 'push' &&
-      vars.RELAY_FIELD_TEST_ENABLED == 'true'
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Wait for backend to stabilize
-        run: sleep 20
-
-      - name: Run relay field test
-        run: bash scripts/relay-field-test.sh
-        env:
-          # Relay phone identity — no Bearer token, only installationId + secret
-          #
-          # Přípona /api je tady schválně. Secret API_BASE_URL se drží BEZ ní,
-          # protože rozvoz APK výš i backend (vultrRoutes.js) si /api dopisují
-          # sami. Tenhle skript a audit-operational-health.js ho naopak čekají
-          # jako součást adresy. Dopsáním tady se obě skupiny spotřebitelů
-          # přestanou hádat o jednu hodnotu.
-          #
-          # relay-field-test.sh od 3. 11. 2026 BEZ téhle proměnné skončí
-          # s kódem 2. Dřív měl zapsanou výchozí adresu na zaniklý server,
-          # takže se tvářil, že má kam volat.
-          API_BASE_URL:            ${{ secrets.API_BASE_URL }}/api
-          RELAY_INSTALLATION_ID:   ${{ secrets.RELAY_INSTALLATION_ID }}
-          RELAY_PROFILE_ID:        ${{ secrets.RELAY_PROFILE_ID }}
-          DEVICE_SECRET:           ${{ secrets.NEXUS_DEVICE_SECRET }}
-          CALLER_PHONE:            ${{ vars.RELAY_TEST_CALLER_PHONE || '+420000000001' }}
-          FIELD_TEST_STRICT:       'true'
-          # Optional: operator/manager read-only access to verify DB persistence
-          RELAY_CHECKER_EMAIL:     ${{ secrets.RELAY_CHECKER_EMAIL }}
-          RELAY_CHECKER_PASSWORD:  ${{ secrets.RELAY_CHECKER_PASSWORD }}
-
-      - name: Run strict operational health smoke
-        run: node server/scripts/audit-operational-health.js
-        env:
-          # Totéž co výš: skript čeká adresu včetně /api, secret ji nemá.
-          OPS_API_BASE_URL:           ${{ secrets.API_BASE_URL }}/api
-          # App Owner login for /admin/operational-health (admin endpoint)
-          OPS_OWNER_EMAIL:            ${{ secrets.TEST_OWNER_EMAIL }}
-          OPS_OWNER_PASSWORD:         ${{ secrets.TEST_OWNER_PASSWORD }}
-          # Relay phone identity for relay-specific checks (no manager token)
-          OPS_RELAY_PROFILE_ID:       ${{ secrets.RELAY_PROFILE_ID }}
-          OPS_RELAY_INSTALLATION_ID:  ${{ secrets.RELAY_INSTALLATION_ID }}
-          OPS_DEVICE_SECRET:          ${{ secrets.NEXUS_DEVICE_SECRET }}
-          OPS_SMOKE_CALLER:           ${{ vars.RELAY_TEST_CALLER_PHONE || '+420000000001' }}
-          OPS_MAX_MESSAGE_AGE_DAYS:   '7'
-          STRICT_OPERATIONAL_HEALTH:  'true'
-
-  # Pojistka, která se tiše přeskočí, není pojistka.
+  # ── Android Relay: proč tu po nasazení nic nevolá na telefon ─────────────────
   #
-  # relay-field-test se neprovede ze tří důvodů a všechny tři vypadají
-  # v přehledu běhu stejně nevinně — jako „skipped":
-  #   1. RELAY_FIELD_TEST_ENABLED není 'true' (dnes v repozitáři není ani
-  #      jedna proměnná, takže je vypnutý);
-  #   2. chybí secrety, které potřebuje — po zapnutí by spadl na preflightu
-  #      v scripts/relay-field-test.sh;
-  #   3. spadl deploy-backend, na kterém visí.
+  # Do 15. 11. 2026 tu byly dvě úlohy: `relay-field-test`, která po nasazení
+  # poslala na produkční `/api/device/relay` falešnou SMS a zvonění, a
+  # `relay-field-test-stav`, která hlásila, že první z nich není vyzbrojená.
+  # Obě jsou odstraněné. Tohle je záznam proč, aby je za půl roku nikdo
+  # nepřidal znovu ze stejné dobré pohnutky.
   #
-  # Tahle úloha proto na deploy-backend SCHVÁLNĚ nezávisí: kdyby na něm
-  # visela, mlčela by přesně v těch situacích, kvůli kterým vznikla.
+  #   1. Zapisovala na produkci a neuklízela po sobě. Příchozí SMS se ukládají,
+  #      než se rozešlou, takže každé nasazení masteru by do chatu reálné
+  #      modelky přidalo zprávu od +420000000001. Mazací krok skript nemá.
+  #   2. Potřebovala v CI veřejného repozitáře hesla — `RELAY_CHECKER_PASSWORD`
+  #      a `TEST_OWNER_PASSWORD` — jen aby si přes `/auth/login` ověřila, že
+  #      zpráva dosedla do databáze.
+  #   3. Od 3. 11. 2026 nebyla ani jednou zapnutá, takže nikdy nic nehlídala.
+  #      `relay-field-test-stav` tohle sice správně hlásila jako varování,
+  #      ale hlásit nevyzbrojenou pojistku není totéž jako mít pojistku.
   #
-  # Nezhazuje build. Jestli terénní test zapnout a dodat mu údaje, je
-  # rozhodnutí člověka — tahle úloha jen zajišťuje, aby se to rozhodovalo
-  # vědomě, a ne mlčením.
-  relay-field-test-stav:
-    name: Relay Field Test — stav pojistky
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
-
-    steps:
-      # Secrety se testují jen na prázdnotu (secrets.X != ''), takže se do
-      # logu nedostane žádná hodnota — ani zamaskovaná.
-      - name: Je terénní test vyzbrojený?
-        env:
-          ZAPNUTO:     ${{ vars.RELAY_FIELD_TEST_ENABLED }}
-          MA_API:      ${{ secrets.API_BASE_URL != '' }}
-          MA_SECRET:   ${{ secrets.NEXUS_DEVICE_SECRET != '' }}
-          MA_INSTAL:   ${{ secrets.RELAY_INSTALLATION_ID != '' }}
-          MA_PROFIL:   ${{ secrets.RELAY_PROFILE_ID != '' }}
-          MA_OWNER_M:  ${{ secrets.TEST_OWNER_EMAIL != '' }}
-          MA_OWNER_P:  ${{ secrets.TEST_OWNER_PASSWORD != '' }}
-        run: |
-          CHYBI=""
-          [ "$MA_API"     = "true" ] || CHYBI="$CHYBI API_BASE_URL"
-          [ "$MA_SECRET"  = "true" ] || CHYBI="$CHYBI NEXUS_DEVICE_SECRET"
-          [ "$MA_INSTAL"  = "true" ] || CHYBI="$CHYBI RELAY_INSTALLATION_ID"
-          [ "$MA_PROFIL"  = "true" ] || CHYBI="$CHYBI RELAY_PROFILE_ID"
-          [ "$MA_OWNER_M" = "true" ] || CHYBI="$CHYBI TEST_OWNER_EMAIL"
-          [ "$MA_OWNER_P" = "true" ] || CHYBI="$CHYBI TEST_OWNER_PASSWORD"
-
-          echo "### Relay Field Test — stav pojistky" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          if [ "$ZAPNUTO" = "true" ] && [ -z "$CHYBI" ]; then
-            echo "Vyzbrojená: proměnná zapnutá a všechny potřebné secrety nastavené." >> "$GITHUB_STEP_SUMMARY"
-            echo "OK: terénní test je vyzbrojený."
-            exit 0
-          fi
-
-          echo "**Neprovede se.** Přeposílání na relay telefonu tedy po tomhle nasazení nikdo neověří." >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          if [ "$ZAPNUTO" != "true" ]; then
-            echo "- Vypnutý: \`RELAY_FIELD_TEST_ENABLED\` není \`true\` (teď: \`${ZAPNUTO:-nenastaveno}\`)." >> "$GITHUB_STEP_SUMMARY"
-            echo "::warning::Relay field test je vypnutý (RELAY_FIELD_TEST_ENABLED != true) — přeposílání na telefonu nic nehlídá."
-          fi
-
-          if [ -n "$CHYBI" ]; then
-            echo "- Chybí secrety:$CHYBI" >> "$GITHUB_STEP_SUMMARY"
-            echo "::warning::Relay field testu chybí secrety:$CHYBI — i po zapnutí by spadl na preflightu."
-          fi
+  # Všechna její tvrzení už kontroluje `server/tests/deviceRelay.test.js`
+  # v bráně — proti dočasné databázi, bez hesel a bez zápisu na produkci:
+  # platný secret zprávu uloží, špatný vrátí 401, cizí `userId` se odmítne,
+  # zvonění založí CallLog a duplicita z inbox fallbacku se zahodí.
+  #
+  # Druhý krok té úlohy byl `audit-operational-health.js` se
+  # `STRICT_OPERATIONAL_HEALTH=true`. Ten je odstraněný spolu s ní, protože se
+  # na App Ownera hlásil heslem z CI. Obyčejný `/health` kontroluje `hlidka.yml`
+  # každé dvě hodiny; striktní admin varianta zůstává ruční položkou brány 7
+  # v `docs/pilot-readiness-checklist.md`.
+  #
+  # Co naopak NIKDO automaticky nehlídá, a je to vědomé rozhodnutí: jestli
+  # přeposílání doopravdy funguje na konkrétním telefonu s konkrétní SIM.
+  # To nejde ověřit bez člověka, který tu SMS odešle. Postup je
+  # v `docs/zivy-test-dvou-telefonu.md`; co po každém kroku leží v databázi,
+  # přečte workflow `Kontrola relay telefonu` (jen pro čtení, na vyžádání).
+  #
+  # `scripts/relay-field-test.sh` zůstává jako ruční nástroj, ale CI ho
+  # nespouští. Na produkci s reálnými uživateli ho pouštět nemá smysl ze
+  # stejného důvodu, proč tu úloha není — zapisuje.
