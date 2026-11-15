@@ -12,11 +12,19 @@ každém kroku ověřit, co doopravdy leží v databázi**, a ne jen co je vidě
 
 | | |
 | --- | --- |
-| **Telefon A — relay** | se SIM kartou, nainstalovaná **Nexus Relay** (`com.nexushub.relay`) |
+| **Telefon A — relay** | **vyhrazený** telefon se SIM kartou, nainstalovaná **Nexus Relay** (`com.nexushub.relay`) |
 | **Telefon B — volající** | jakýkoli telefon, ze kterého jdou poslat SMS na číslo telefonu A |
 | **Účet modelky** | `testovaci.profil.a@nexusstack.eu` — jím se přihlásí telefon A |
 | **Účet operátorky** | `test-op1@nexusstack.eu` — jím se ve webu píšou odpovědi |
 | **Prohlížeč** | web aplikace, přihlášená jako operátorka |
+
+> **Telefon A musí být pro tenhle test vyhrazený, ne osobní.** Relay při
+> prvním připojení nahraje až 500 příchozích SMS za posledních 31 dní z celého
+> inboxu a dál přeposílá **každou** příchozí SMS — filtr odesílatele nikde
+> neexistuje. Na vyhrazeném telefonu je to v pořádku, protože na tom čísle nic
+> jiného nechodí. Na osobním telefonu by to nahrálo soukromou korespondenci.
+> Scénář „osobní telefon používaný i jako relay" vyžaduje filtr podle pracovní
+> SIM, který zatím není — viz brána 9 v `docs/pilot-readiness-checklist.md`.
 
 Hesla k těmhle účtům má vlastník projektu. **Přihlašuje vždy člověk**, ne
 automat ani asistent.

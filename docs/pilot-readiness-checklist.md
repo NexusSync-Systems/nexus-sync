@@ -224,6 +224,50 @@ Musi byt splnene:
   overovani uctu telefonatem. Nas pripad to neni, ale ukazuje to, ze seznam
   povolenych pouziti nestoji na miste.
 
+### Co presne relay cte, a ze na tom zavisi typ telefonu
+
+Relay nema **zadny filtr odesilatele**. `handleRelay`
+(`server/src/controllers/deviceController.js`) ulozi kazdou prichozi SMS,
+ktera na cislo relay SIM dojde, a zalozi k ni chat. `BlacklistEntry` je
+registr nebezpecnych klientu (telefon, znacka, duvod, zavaznost), ne filtr
+zprav, a relay cesta ho vubec necte. Android strana o SIM nevi nic:
+`NexusSmsReceiver` vytahne z PDU odesilatele a text, `subscriptionId` nikam
+neposila.
+
+Navic se pri kazdem uspesnem pripojeni spusti import historie. `RelayMode.jsx`
+vola `syncSmsHistory`, kdyz je `connected`, a `RelayModeView.jsx` mu preda
+`{ limit: 500, lookbackMs: 31 dni }`. Nativni cast se zepta na
+`Telephony.Sms.Inbox.CONTENT_URI` s podminkou `date > since`, kde `since` je
+pri PRVNIM behu `now - 31 dni`, protoze `lastSyncAt` je jeste nula. Dalsi behy
+uz jsou prirustkove. Dusledek: prvni pripojeni nahraje az 500 prichozich SMS
+za posledni mesic z celeho inboxu, bez ohledu na odesilatele.
+
+Proto zalezi, jaky telefon relay je:
+
+| Scenar | Stav |
+| --- | --- |
+| **Vyhrazeny telefon** jen pro relay | Soucasny navrh je presne pro tenhle pripad a je v poradku. Import historie nema co nahrat a preposilat vsechno je spravne, protoze na tom cisle nic jineho nechodi. |
+| **Osobni telefon** pouzivany i jako relay | Soucasny navrh tohle **neumi bezpecne**. Prvni pripojeni nahraje mesic soukrome korespondence a dal se preposila kazda prichozi SMS: banka, rodina, lekar. Relay je navic v tomhle scenari jeji vychozi SMS aplikace. |
+
+Ze je kod postaveny na prvnim scenari, rika i komentar v
+`NexusRelayPlugin.java`: "Relay je zarizeni se SIM, ktere nikam nechodi."
+
+Druhy scenar **neni nastaveni, ale funkce**. Nejcistsi pravidlo je *pracovni
+SIM*: preposilat jen zpravy prijate na pracovni SIM a zpravy z osobni SIM
+nesmi telefon vubec opustit. Dnes to nejde na zadnem kroku cesty -- receiver
+`subscriptionId` necte, payload ho nenese, server ho neuklada a `handleRelay`
+nefiltruje. Alternativa "preposilat jen od cisel, ktera uz maji chat" je
+leciva jen zdanlive: prvni zprava noveho klienta by nikdy nedosla, cili by to
+rozbilo presne to, k cemu relay je.
+
+Musi byt splnene:
+
+- Je rozhodnute, ktery scenar pilot pouziva, a je to zapsane v postupu testu.
+- Pokud osobni telefon: existuje filtr podle pracovni SIM od Androidu az po
+  `handleRelay` a je overene, ze zprava z osobni SIM telefon neopusti.
+- Import historie pri pripojeni ma vedome nastavene okno. 31 dni je vychozi
+  stav, ktery nikdo nezvolil, ne rozhodnuti.
+
 Go/no-go:
 
 - No-go, pokud neexistuje pravni zaklad pro preposilani SMS tretich osob.
@@ -237,6 +281,9 @@ Go/no-go:
   opravneni a timhle ucelem.
 - No-go, pokud modelka nevi, ze jeji prichozi SMS cte nekdo jiny.
 - No-go, pokud se SMS varianta a varianta s polohou slouci do jednoho APK.
+- No-go, pokud se jako relay pouzije osobni telefon bez filtru podle
+  pracovni SIM.
+- No-go, pokud prvni pripojeni nahraje zpravy, ktere s praci nemaji co delat.
 
 ## 10. Rollback plan
 
