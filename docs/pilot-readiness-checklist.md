@@ -163,6 +163,67 @@ treti strany, doby uchovani a deset otazek, ktere musi rozhodnout clovek.
 - Monitoring vykonu operatorek (`OperatorMetrics`, `OperatorWorkSession`) ma
   vlastni pravni zaklad a zamestnankyne o nem vedi.
 
+### Distribuce a zasady Obchodu Play
+
+Tahle cast brany chybela a neni to pravni otazka v uzkem smyslu -- je to
+otazka, jestli aplikaci vubec smime rozdavat tak, jak ji rozdavame.
+
+Relay se do Obchodu Play **nedava**, instaluje se stranou z vlastniho serveru
+(`/api/vultr/download-relay.apk`). Je to vedome rozhodnuti, ne provizorium.
+Duvod: `nexusRelay` zada celou omezenou sadu opravneni -- `READ_SMS`,
+`RECEIVE_SMS`, `SEND_SMS`, `WRITE_SMS`, `RECEIVE_MMS`, `READ_CALL_LOG`,
+`READ_PHONE_STATE`, `CALL_PHONE`, `MANAGE_OWN_CALLS`. Byt vychozi SMS
+aplikace je sice povolene pouziti, ale nas ucel neni "zrcadlit zpravy na
+druhe zarizeni tehoz cloveka" -- je to "preposlat je operatorkam, ktere na ne
+odpovidaji jmenem majitelky cisla". Takovy ucel v povolenem seznamu neni.
+Vlastni manifest to rika presne: "Forwards SMS and call events from
+a dedicated relay handset to the operator console."
+
+Tvrdsi pravidlo nez SMS zasady je to o stalkerware: sledovat jineho cloveka
+je zakazane **i s jeho vedomim a souhlasem**. Vyjimku maji rodicovska kontrola
+a sprava firemnich zarizeni, a i ty musi mit v manifestu `IsMonitoringTool`,
+trvale oznameni, vlastni ikonu, byt zdarma a nepouzivat platby v Play.
+`nexusRelay` priznak `IsMonitoringTool` nema.
+
+Co je naopak v nas prospech a nesmi se to pokazit: varianta, ktera cte SMS,
+**nema polohu**. `ACCESS_BACKGROUND_LOCATION` je jen v `nexusFull`. Zpravy
+a poloha v jednom balicku jsou presne podpis te kategorie, takze slouceni
+obou variant do jednoho APK by riziko zvedlo.
+
+Musi byt splnene:
+
+- Je zapsane, ze relay se nedava do Obchodu, a vi to i ten, kdo bude stavet
+  dalsi verzi.
+- Modelka vi, ze se jeji prichozi SMS ze SIM karty preposilaji a kdo je cte.
+  Je to totez, co resi informacni povinnost vys, jen z druhe strany: Google
+  se pta na souhlas majitelky telefonu, GDPR na lidi, kteri ji pisou.
+- Pri instalaci se overilo, co rekne Play Protect. Skenuje i aplikace
+  instalovane mimo Obchod a aplikace, ktera cte vsechny SMS a posila je na
+  server, je kandidat na klasifikaci. Dusledek by nebyl "zamitnuto
+  v Obchode", ale varovani pri instalaci nebo vypnuti aplikace na telefonu.
+  Predpovedet to nejde, zjisti se az na telefonu -- proto je to krok 0
+  v `docs/zivy-test-dvou-telefonu.md`.
+- Je rozhodnute, jestli pridat `IsMonitoringTool`. Na sideloadu nic nerozbije
+  a je to cestne oznaceni toho, co aplikace dela; pro Obchod by bylo povinne.
+- `READ_CALL_LOG` ma znamy duvod. **Neni to nepouzite opravneni**, i kdyz se
+  `CallLog` v kodu necte: potrebuje ho `PhoneStateListener`, aby na Androidu
+  9-11 vubec dorucil cislo volajiciho (`minSdk` je 24, takze takove telefony
+  jsou v rozsahu). Na Androidu 12+ ho nahrazuje
+  `TelephonyCallback.CallStateListener`, ktery cislo uz z principu nenese --
+  kod tam udalost zahodi (`from == null`) a hovory hlasi `NexusInCallService`,
+  ktery tohle opravneni nepotrebuje. Pokud pilotni telefon pojede na Androidu
+  12+, da se opravneni omezit pres `android:maxSdkVersion="30"` a jedno
+  omezene opravneni z manifestu zmizi. Pred zivym testem to zamerne nemenime
+  -- vynutilo by to novy build APK uprostred zkousky.
+- Kdyby to nekdy melo byt v Obchode, jedina realna cesta je privatni aplikace
+  v Managed Google Play s firemnim zapisem zarizeni, ne verejne vydani.
+  `nexusFull` ma vlastni prekazku: `ACCESS_BACKGROUND_LOCATION` patri
+  k nejvic zkoumanym opravnenim a chce zvlastni zduvodneni a video.
+- Zneni zasad je overene proti zivym strankam, ne proti teto poznamce. Zasady
+  se meni: k cervenci 2026 prestava byt `READ_CALL_LOG` povoleny pro
+  overovani uctu telefonatem. Nas pripad to neni, ale ukazuje to, ze seznam
+  povolenych pouziti nestoji na miste.
+
 Go/no-go:
 
 - No-go, pokud neexistuje pravni zaklad pro preposilani SMS tretich osob.
@@ -172,6 +233,10 @@ Go/no-go:
   by znamenalo zavazne prohlaseni o pravnim zakladu, ktery nikdo neposoudil.
 - No-go, pokud se nemaze nic a data by se hromadila bez lhuty od prvniho dne.
 - No-go, pokud nikdo neni urceny k vyrizovani zadosti subjektu.
+- No-go, pokud se relay dostane do verejneho Obchodu Play s touhle sadou
+  opravneni a timhle ucelem.
+- No-go, pokud modelka nevi, ze jeji prichozi SMS cte nekdo jiny.
+- No-go, pokud se SMS varianta a varianta s polohou slouci do jednoho APK.
 
 ## 10. Rollback plan
 
