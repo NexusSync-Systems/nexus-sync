@@ -116,6 +116,9 @@ Go/no-go:
 - `/health` vraci `200`.
 - `/api/admin/operational-health` je dostupne App Ownerovi.
 - `STRICT_OPERATIONAL_HEALTH=true npm run ops:health` probehne proti deploynutemu backendu.
+  Tohle je rucni krok a zadne CI ho za vas neudela: hlasil by se na App Ownera
+  heslem z workflow, takze uloha, ktera to delala, je od 15. 11. 2026 odstranena.
+  Automaticky bezi jen obycejny `/health` v `Hlidka serveru`, kazde dve hodiny.
 - Telegram alert se odesle pro degradovany stav nebo je vedome vypnuty.
 - Stale Stripe/card pending platby generuji warning.
 - Offline Relay bindingy generuji warning po limitu.

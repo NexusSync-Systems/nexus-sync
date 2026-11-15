@@ -5,6 +5,17 @@
 # Simulates the exact HTTP traffic the Android Relay app running on the MODEL's
 # phone sends to the Nexus Hub backend.
 #
+# RUCNI NASTROJ. CI tenhle skript od 15. 11. 2026 NESPOUSTI; uloha
+# `relay-field-test` je z `.github/workflows/ci.yml` odstranena a je tam
+# zaznam proc. Duvod ve zkratce: skript ZAPISUJE. Kroky [2]-[4] poslou na
+# `/api/device/relay` prichozi SMS a zvoneni, backend je ulozi a skript po
+# sobe neuklizi. Na produkci s realnymi uzivateli ho proto nepouste --
+# pridal by zpravu od CALLER_PHONE do chatu skutecne modelky.
+#
+# Co tvrdi, uz kontroluje `server/tests/deviceRelay.test.js` v brane, proti
+# docasne databazi a bez hesel. Zivy test telefonu je
+# v `docs/zivy-test-dvou-telefonu.md`.
+#
 # Architecture:
 #   • Relay app is installed on the MODEL's phone.
 #   • It authenticates using installationId + a per-device HMAC secret
