@@ -1584,6 +1584,149 @@ jobs:
             exit 1
           }
 
+  # ── Kontrola relay telefonu nasucho ───────────────────────────────────────────
+  #
+  # `kontrola-relay-telefonu.sh` se pouští ručně při živém testu dvou telefonů,
+  # tedy zřídka a jen tehdy, když má někdo telefon v ruce. Kdyby se její dotazy
+  # rozešly se schématem, nikdo by to do té doby nezjistil — a zjistil by to
+  # v nejhorší možnou chvíli, uprostřed testu, kdy má člověk hledat vadu
+  # v telefonu a ne v mém SQL.
+  #
+  # Proto schéma NEVYRÁBÍM ručně jako u obnovovací zkoušky výš, ale aplikuju
+  # skutečné migrace. Tím se z téhle úlohy stane hlídka jmen sloupců:
+  # přejmenování `appVariant` nebo `ownerId` tady spadne.
+  kontrola-relay-nasucho:
+    name: Kontrola relay telefonu (nasucho)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nexus_relay_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+
+    # Heslo zvlášť a URL se skládá za běhu — stejný důvod jako u úlohy výš:
+    # zapsaný connection string by budil kontrolu tajemství.
+    env:
+      PGPASSWORD_CI: postgres
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Nástroje PostgreSQL
+        run: sudo apt-get update -qq && sudo apt-get install -y postgresql-client
+
+      - name: Schéma ze skutečných migrací
+        run: |
+          set -euo pipefail
+          URL="postgresql://postgres:${PGPASSWORD_CI}@localhost:5432/nexus_relay_test"
+          echo "DATABASE_URL=$URL" >> "$GITHUB_ENV"
+
+          # Glob, ne `ls | sort`: shell ho řadí sám a jména migrací začínají
+          # časovou značkou, takže abecedně = chronologicky (`0_init` první).
+          POCET=0
+          for F in server/prisma/migrations/*/migration.sql; do
+            [ -f "$F" ] || continue
+            psql "$URL" -q -v ON_ERROR_STOP=1 -f "$F" >/dev/null
+            POCET=$((POCET+1))
+          done
+          echo "migrací aplikováno: $POCET"
+          [ "$POCET" -ge 12 ] || {
+            echo "::error::Aplikovalo se jen $POCET migrací — schéma není celé."
+            exit 1
+          }
+
+      - name: Profil, telefon a deset příchozích SMS
+        run: |
+          set -euo pipefail
+          psql "$DATABASE_URL" -q -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO "Agency"(id,name,region,"updatedAt") VALUES ('ag1','Zkouska','CZ',now());
+          INSERT INTO "Role"(id,name,permissions,"updatedAt") VALUES
+            ('r_model','Model','[]',now()), ('r_op','Operator','[]',now());
+          INSERT INTO "User"(id,email,password,name,"roleId","agencyId","updatedAt") VALUES
+            ('u_model','m@x.test','x','Modelka','r_model','ag1',now()),
+            ('u_op1','o@x.test','x','Operatorka','r_op','ag1',now());
+          INSERT INTO "Profile"(id,name,"agencyId","ownerId","updatedAt") VALUES
+            ('p_a','Zkouska profil','ag1','u_model',now());
+          INSERT INTO "_ProfileAssignees"("A","B") VALUES ('p_a','u_op1');
+          INSERT INTO "DeviceBinding"(id,"installationId","userId","agencyId","profileId","appVariant",active,"lastSeenAt","updatedAt") VALUES
+            ('d_relay','inst-relay','u_model','ag1','p_a','relay',true,now(),now()),
+            ('d_full','inst-full','u_model','ag1','p_a','full',true,now(),now());
+          INSERT INTO "Chat"(id,"externalId","profileId","agencyId","updatedAt") VALUES
+            ('ch1','+420000000001','p_a','ag1',now());
+          INSERT INTO "Message"(id,"chatId",direction,transport,text,status,"createdAt","updatedAt")
+          SELECT 'm'||g,'ch1','INBOUND','sms','zkouska '||g||'/10','delivered',
+                 now() - (g || ' seconds')::interval, now() FROM generate_series(1,10) g;
+          SQL
+
+      - name: Kontrola musí projít na 10/10
+        run: |
+          set -euo pipefail
+          PROFIL="Zkouska profil" OKNO_MIN=30 CEKANO_SMS=10 \
+            bash server/scripts/kontrola-relay-telefonu.sh
+
+      # Kontrola, která nikdy nic nezamítla, nic neověřuje. Tahle dvě selhání
+      # jsou přesně ta, kvůli kterým brána 5 existuje: ztracená SMS a zpráva
+      # uložená dvakrát po dosynchronizování.
+      - name: Chybějící SMS musí kontrolu zamítnout
+        run: |
+          set -euo pipefail
+          if PROFIL="Zkouska profil" OKNO_MIN=30 CEKANO_SMS=11 \
+               bash server/scripts/kontrola-relay-telefonu.sh > /tmp/chybi.log 2>&1; then
+            echo "::error::Kontrola prošla, i když chybí jedna SMS. Mez na počet nefunguje."
+            cat /tmp/chybi.log
+            exit 1
+          fi
+          grep -q 'čekáno 11' /tmp/chybi.log || {
+            echo "::error::Zamítnuto, ale z jiného důvodu než kvůli počtu SMS."
+            cat /tmp/chybi.log
+            exit 1
+          }
+          echo "✓ chybějící SMS kontrolu zamítne"
+
+      - name: Duplicitní SMS musí kontrolu zamítnout
+        run: |
+          set -euo pipefail
+          psql "$DATABASE_URL" -q -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO \"Message\"(id,\"chatId\",direction,transport,text,status,\"createdAt\",\"updatedAt\")
+             VALUES ('mdup','ch1','INBOUND','sms','zkouska 3/10','delivered',now() - interval '3 seconds',now());"
+
+          if PROFIL="Zkouska profil" OKNO_MIN=30 CEKANO_SMS=0 \
+               bash server/scripts/kontrola-relay-telefonu.sh > /tmp/dup.log 2>&1; then
+            echo "::error::Kontrola prošla i s duplicitní příchozí SMS."
+            cat /tmp/dup.log
+            exit 1
+          fi
+          grep -q 'duplicitní příchozí SMS' /tmp/dup.log || {
+            echo "::error::Zamítnuto, ale z jiného důvodu než kvůli duplicitě."
+            cat /tmp/dup.log
+            exit 1
+          }
+          echo "✓ duplicitní SMS kontrolu zamítne"
+
+      - name: Kontrola nesmí umět zapisovat
+        run: |
+          set -euo pipefail
+          # Pojistka ze skriptu (`default_transaction_read_only=on`) má platit
+          # i tady. Kdyby ji někdo odstranil, tenhle krok to pozná.
+          if PGOPTIONS='-c default_transaction_read_only=on' \
+               psql "$DATABASE_URL" -q -c "UPDATE \"Profile\" SET name='prepsano' WHERE id='p_a';" 2>/dev/null; then
+            echo "::error::Zápis v režimu jen pro čtení prošel. Pojistka neplatí."
+            exit 1
+          fi
+          JMENO=$(psql "$DATABASE_URL" -t -A -c "SELECT name FROM \"Profile\" WHERE id='p_a';")
+          [ "$JMENO" = "Zkouska profil" ] || {
+            echo "::error::Jméno profilu se změnilo na '$JMENO' — něco zapsalo."
+            exit 1
+          }
+          echo "✓ databáze zápis odmítla a data jsou nedotčená"
+
   # ── Backup / restore readiness audit ──────────────────────────────────────────
   backup-restore-audit:
     name: Backup / Restore Readiness Audit
