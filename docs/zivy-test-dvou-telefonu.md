@@ -12,11 +12,19 @@ každém kroku ověřit, co doopravdy leží v databázi**, a ne jen co je vidě
 
 | | |
 | --- | --- |
-| **Telefon A — relay** | se SIM kartou, nainstalovaná **Nexus Relay** (`com.nexushub.relay`) |
+| **Telefon A — relay** | **vyhrazený** telefon se SIM kartou, nainstalovaná **Nexus Relay** (`com.nexushub.relay`) |
 | **Telefon B — volající** | jakýkoli telefon, ze kterého jdou poslat SMS na číslo telefonu A |
 | **Účet modelky** | `testovaci.profil.a@nexusstack.eu` — jím se přihlásí telefon A |
 | **Účet operátorky** | `test-op1@nexusstack.eu` — jím se ve webu píšou odpovědi |
 | **Prohlížeč** | web aplikace, přihlášená jako operátorka |
+
+> **Telefon A musí být pro tenhle test vyhrazený, ne osobní.** Relay při
+> prvním připojení nahraje až 500 příchozích SMS za posledních 31 dní z celého
+> inboxu a dál přeposílá **každou** příchozí SMS — filtr odesílatele nikde
+> neexistuje. Na vyhrazeném telefonu je to v pořádku, protože na tom čísle nic
+> jiného nechodí. Na osobním telefonu by to nahrálo soukromou korespondenci.
+> Scénář „osobní telefon používaný i jako relay" vyžaduje filtr podle pracovní
+> SIM, který zatím není — viz brána 9 v `docs/pilot-readiness-checklist.md`.
 
 Hesla k těmhle účtům má vlastník projektu. **Přihlašuje vždy člověk**, ne
 automat ani asistent.
@@ -61,6 +69,15 @@ adb shell cmd role holders android.app.role.SMS
 Třetí příkaz **musí vypsat `com.nexushub.relay`**. Když vypíše něco jiného,
 relay SMS vůbec nedostane a zbytek testu nemá smysl.
 
+**Při instalaci si zapište, co řekne Play Protect.** Relay se do Obchodu
+nedává, ale Play Protect skenuje i aplikace instalované stranou — a aplikace,
+která čte všechny SMS a posílá je na server, je kandidát na klasifikaci.
+Zapište, co přesně ukázal: nic, varování, nebo nabídku aplikaci neinstalovat.
+Předpovědět to nejde, pozná se až na telefonu, a je to položka brány 9
+v `docs/pilot-readiness-checklist.md`. Důsledkem by nebylo zamítnutí
+v Obchodu, ale varování při instalaci nebo vypnutí aplikace během provozu —
+což by v pilotu vypadalo jako „relay přestal posílat SMS".
+
 **Potřebujete alespoň `3.155-b1074`.** Starší APK nemá obnovu tokenu z #193 —
 relay po hodině tiše přestane mít živé spojení (SMS by pořád chodily přes
 `deviceSecret`, ale krok 8 níž by selhal).
@@ -76,6 +93,12 @@ gh workflow run kontrola-relay-telefonu.yml -f profil="Testovaci profil A" -f ok
 
 Čeká se: `✓ profil má vlastní účet vlastníka`, `přiřazených operátorek: 1`
 a v tabulce vazeb řádek `relay | t | 1` se stářím `lastSeenAt` v sekundách.
+
+> **Počet vazeb nenaroste.** Podle #188 má profil jednu aktivní vazbu na
+> variantu, takže nové párování to staré nahradí. Důkazem úspěchu je, že
+> **stáří `lastSeenAt` spadne na sekundy** — ne že se objeví druhý řádek.
+> Kdyby `lastSeenAt` zůstal starý, telefon se ve skutečnosti neohlásil,
+> i kdyby aplikace tvrdila, že je spárováno.
 
 **Když role vlastníka ukazuje na operátorku**, zastavte se tady — je to ta
 vada, kterou řešily #184 a #185, a bez vlastnictví se sledování polohy
